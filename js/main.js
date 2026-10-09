@@ -85,9 +85,13 @@ game.loadGame();
 /* stored options */
 const OPT_KEY = 'vesper:opts';
 const PIXEL_PRESETS = { chunky: 320, classic: 480, fine: 720 };
-const PALETTE_PRESETS = { smooth: 0, dusk: 1, ember: 2, mono: 3 };
-let opts = { sens: 1, invert: false, autoq: true, quality: 1, pixel: 480, palette: 1 };
+const PALETTE_PRESETS = { none: 0, smooth: 0, dusk: 1, ember: 2, mono: 3 };
+let opts = { sens: 1, invert: false, autoq: true, quality: 1, style: 'painted', pixel: 480, palette: 0 };
 try { opts = Object.assign(opts, JSON.parse(localStorage.getItem(OPT_KEY) || '{}')); } catch (e) {}
+if (params.has('style')) {
+  const v = params.get('style');
+  opts.style = (v === 'pixel' || v === 'painted') ? v : 'painted';
+}
 if (params.has('pixel')) {
   const v = params.get('pixel');
   opts.pixel = PIXEL_PRESETS[v] || parseInt(v, 10) || 480;
@@ -100,6 +104,7 @@ if (params.has('palette')) {
 game.input.sensitivity = opts.sens;
 game.input.invertY = !!opts.invert;
 if (!opts.autoq) { renderer.quality = opts.quality; game.qualityLock = true; }
+renderer.renderStyle = opts.style === 'pixel' ? 'pixel' : 'painted';
 renderer.capPixels = opts.pixel;
 renderer.palette = opts.palette;
 
@@ -226,6 +231,11 @@ document.getElementById('set-quality').addEventListener('input', (e) => {
   }
   OPT_KEY_CHECK();
 });
+document.getElementById('set-style').addEventListener('change', (e) => {
+  opts.style = e.target.value === 'pixel' ? 'pixel' : 'painted';
+  renderer.renderStyle = opts.style;
+  OPT_KEY_CHECK();
+});
 document.getElementById('set-pixel').addEventListener('change', (e) => {
   opts.pixel = parseInt(e.target.value, 10);
   renderer.capPixels = opts.pixel;
@@ -244,6 +254,7 @@ document.getElementById('set-sens').value = opts.sens;
 document.getElementById('set-invert').checked = !!opts.invert;
 document.getElementById('set-autoq').checked = !!opts.autoq;
 document.getElementById('set-quality').value = opts.quality;
+document.getElementById('set-style').value = opts.style === 'pixel' ? 'pixel' : 'painted';
 document.getElementById('set-pixel').value = String(opts.pixel);
 document.getElementById('set-palette').value = String(opts.palette);
 

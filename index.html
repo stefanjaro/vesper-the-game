@@ -78,9 +78,9 @@
   .title, .subtitle, .hint, .colophon { text-rendering: geometricPrecision; }
   #speed { left: 4vw; bottom: 9vh; }
   #alt { left: 4vw; bottom: 12.2vh; }
-  #shards { right: 4vw; top: 8vh; text-align: right; }
+  #shards { position: absolute; right: 4vw; top: 8vh; text-align: right; }
   #shards .n { font-size: 1.6rem; letter-spacing: 0.1em; text-indent: 0; display: block; color: #f5e6c4; text-shadow: 0 0 18px rgba(255,214,140,.5); }
-  #beacons { right: 4vw; top: 13.6vh; text-align: right; font-size: 0.68rem; letter-spacing: 0.28em; color: rgba(238,224,196,.7); }
+  #beacons { position: absolute; right: 4vw; top: calc(8vh + 52px); text-align: right; font-size: 0.68rem; letter-spacing: 0.28em; color: rgba(238,224,196,.7); }
   #compass {
     position: absolute; left: 50%; top: 7vh; transform: translateX(-50%);
     width: 260px; height: 34px; overflow: hidden; opacity: 0.85;
@@ -166,10 +166,10 @@
   @media (max-width: 640px) {
     .hint { font-size: 0.62rem; letter-spacing: 0.2em; text-indent: 0.2em; padding: 0 1rem; }
     .colophon { font-size: 0.54rem; letter-spacing: 0.08em; padding: 0 1rem; }
-    #tips { bottom: 21vh; }
+    #tips { bottom: 21vh; padding: 0 9.5rem 0 1rem; }
     #compass { top: 4vh; }
-    #shards { top: 8vh; }
-    #beacons { top: 13.5vh; font-size: 0.58rem; }
+    #shards { top: 7.5vh; }
+    #beacons { top: calc(7.5vh + 50px); font-size: 0.58rem; }
     .dial { font-size: 0.6rem; }
     #lore { bottom: 26vh; font-size: 0.85rem; }
     #charge { bottom: 17vh; font-size: 0.62rem; }
@@ -300,16 +300,20 @@
   <h2>SETTINGS</h2>
   <label>LOOK SENSITIVITY <input type="range" id="set-sens" min="0.4" max="2.4" step="0.05" value="1"></label>
   <label>INVERT VERTICAL <input type="checkbox" id="set-invert"></label>
+  <label>STYLE <select id="set-style">
+    <option value="painted" selected>PAINTED</option>
+    <option value="pixel">PIXEL</option>
+  </select></label>
   <label>PIXEL SIZE <select id="set-pixel">
     <option value="320">CHUNKY</option>
     <option value="480" selected>CLASSIC</option>
     <option value="720">FINE</option>
   </select></label>
   <label>PALETTE <select id="set-palette">
-    <option value="1" selected>DUSK</option>
+    <option value="0" selected>NONE</option>
+    <option value="1">DUSK</option>
     <option value="2">EMBER</option>
     <option value="3">MONO</option>
-    <option value="0">SMOOTH</option>
   </select></label>
   <label>AUTO QUALITY <input type="checkbox" id="set-autoq" checked></label>
   <label>QUALITY <input type="range" id="set-quality" min="0.5" max="1" step="0.05" value="1"></label>

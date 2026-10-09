@@ -163,39 +163,51 @@ float vnoise(vec2 p){
 }
 
 float shadowFactor(vec3 world, vec3 n, float ndl){
-  /* one tap: shadows are crisp stencils, in the spirit of the palette */
   vec3 sp = world + n * (uShadowExtent / 2048.0) * 2.0;
   vec4 off = uLightViewProjM * vec4(sp, 1.0);
   vec3 proj = off.xyz / off.w;
   if (proj.z > 1.0) return 1.0;
-  float bias = clamp(0.0016 * tan(acos(clamp(ndl, 0.0, 1.0))), 0.0005, 0.06);
-  float d = texture(uShadowMap, proj.xy).r;
-  return (proj.z - bias > d) ? 0.0 : 1.0;
+  float bias = clamp(0.0014 * tan(acos(clamp(ndl, 0.0, 1.0))), 0.0005, 0.05);
+  float shadow = 0.0;
+  for (int i = -1; i <= 1; i++){
+    for (int j = -1; j <= 1; j++){
+      float d = texture(uShadowMap, proj.xy + vec2(float(i), float(j)) * uShadowTexel).r;
+      shadow += (proj.z - bias > d) ? 0.0 : 1.0;
+    }
+  }
+  return shadow / 9.0;
 }
 
 void main(){
   vec3 nGeom = normalize(vNormal);
-  vec3 n = nGeom;
   vec3 p = vWorld;
 
-  float slope = 1.0 - clamp(n.y, 0.0, 1.0);
+  /* dune ripples fade with distance so they never alias at grazing angles */
+  float viewDist = length(p - uCamPos);
+  float detailFade = clamp(1.0 - viewDist / 3200.0, 0.10, 1.0);
+  vec2 rp = p.xz * 0.09;
+  float e = 0.4;
+  float n0 = vnoise(rp + vec2(uTime * 0.008, uTime * 0.005));
+  float nx = vnoise(rp + vec2(uTime * 0.008, uTime * 0.005) + vec2(e, 0.0));
+  float nz = vnoise(rp + vec2(uTime * 0.008, uTime * 0.005) + vec2(0.0, e));
+  vec3 ripple = normalize(vec3((n0 - nx) * 0.7, e, (n0 - nz) * 0.7));
+  vec3 n = normalize(nGeom + ripple * (0.10 * detailFade * clamp(nGeom.y, 0.0, 1.0)));
+
+  float slope = 1.0 - clamp(nGeom.y, 0.0, 1.0);
   float h = p.y;
 
-  vec3 sandA = vec3(0.86, 0.64, 0.40);
-  vec3 sandB = vec3(0.66, 0.45, 0.28);
-  vec3 rock  = vec3(0.38, 0.29, 0.25);
-  vec3 salt  = vec3(0.80, 0.77, 0.71);
-  vec3 oasis = vec3(0.33, 0.40, 0.21);
+  vec3 sandA = vec3(0.93, 0.68, 0.40);
+  vec3 sandB = vec3(0.47, 0.30, 0.26);
+  vec3 rock  = vec3(0.28, 0.22, 0.30);
+  vec3 salt  = vec3(0.74, 0.72, 0.70);
+  vec3 oasis = vec3(0.22, 0.36, 0.22);
 
-  /* broad painted colour fields, no per-pixel noise */
-  float low = vnoise(p.xz * 0.011);
-  float low2 = vnoise(p.xz * 0.0037 + 19.3);
-  vec3 col = mix(sandB, sandA, low * 0.75 + 0.12);
-  col = mix(col, col * vec3(1.08, 0.96, 0.86), low2 * 0.7);
+  float grain = (vnoise(p.xz * 0.9) - 0.5) * (0.20 + 0.25 * detailFade);
+  vec3 col = mix(sandB, sandA, 0.5 + grain);
+  col = mix(col, col * vec3(1.10, 0.97, 0.85), vnoise(p.xz * 0.011) * 0.85);
 
-  float rocky = smoothstep(0.26, 0.4, slope);
-  rocky = floor(rocky * 2.0 + 0.5) * 0.5;
-  col = mix(col, rock * (0.9 + 0.25 * vnoise(p.xz * 0.05)), rocky);
+  float rocky = smoothstep(0.24, 0.46, slope);
+  col = mix(col, rock * (0.85 + 0.3 * vnoise(p.xz * 0.07)), rocky);
 
   float nearWater = smoothstep(uWaterLevel + 6.0, uWaterLevel + 0.5, h);
   col = mix(col, salt * (0.9 + 0.2 * vnoise(p.xz * 0.7)), nearWater * (1.0 - smoothstep(0.3, 0.5, slope)) * 0.9);
@@ -207,12 +219,12 @@ void main(){
   col = mix(col, vec3(0.16, 0.20, 0.19) * (0.85 + 0.3 * vnoise(p.xz * 0.5)), submerged);
 
   float ndlGeom = dot(nGeom, uLightDir);
-  /* flat shadow stencils + three light bands: paint, not physics */
-  float sh = mix(1.0, shadowFactor(p, nGeom, ndlGeom), 0.72);
-  float ndl = floor(clamp(ndlGeom, 0.0, 1.0) * 3.0 + 0.5) / 3.0;
-  float sunTerm = ndl * sh;
-  vec3 amb = mix(uGroundAmbient, uSkyAmbient, clamp(n.y * 0.5 + 0.5, 0.0, 1.0)) * 1.35;
-  vec3 lit = col * (uSunColor * sunTerm + amb);
+  float sh = mix(1.0, shadowFactor(p, nGeom, ndlGeom), 0.85);
+  float sunTerm = clamp(ndlGeom, 0.0, 1.0) * sh;
+  /* cavity darkening: steep faces sink into the shadow colour */
+  float ao = 1.0 - 0.38 * smoothstep(0.22, 0.85, slope);
+  vec3 amb = mix(uGroundAmbient, uSkyAmbient, clamp(nGeom.y * 0.5 + 0.5, 0.0, 1.0)) * 1.15;
+  vec3 lit = col * (uSunColor * sunTerm + amb * ao);
 
   /* the manta's soft drop-shadow on the sand */
   float dGl = distance(p.xz, uGliderPos.xz);

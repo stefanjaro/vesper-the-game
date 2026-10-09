@@ -72,17 +72,17 @@ vec3 planetBody(vec3 ray, float tSurf){
   vec3 n = normalize(pos - PLANET_DIR);
   float lat = dot(n, PLANET_AXIS);
   float bandN = fbm(vec2(lat * 14.0, uTime * 0.004) + 31.7);
-  /* discrete painted bands survive the palette step */
-  float bands = floor((0.5 + 0.5 * sin(lat * 22.0 + bandN * 5.0)) * 4.0) / 4.0;
-  vec3 surf = mix(vec3(0.94, 0.87, 0.72), vec3(0.40, 0.55, 0.56), bands);
-  vec3 surf2 = mix(vec3(0.62, 0.66, 0.60), vec3(0.26, 0.36, 0.48), bands);
+  float bands = 0.5 + 0.5 * sin(lat * 24.0 + bandN * 5.0);
+  bands = bands * bands * (3.0 - 2.0 * bands);      // rich banded cloudscape
+  vec3 surf = mix(vec3(0.93, 0.86, 0.70), vec3(0.42, 0.56, 0.58), bands);
+  vec3 surf2 = mix(vec3(0.66, 0.68, 0.62), vec3(0.24, 0.34, 0.50), bands);
   surf = mix(surf, surf2, smoothstep(0.45, 0.95, abs(lat)));
   float nl = clamp(dot(n, uSunDir), 0.0, 1.0);
   float nightSide = smoothstep(0.0, -0.25, dot(n, uSunDir));
-  vec3 lit = surf * (nl * 1.2 + 0.03) * mix(1.0, 0.45, uNight * 0.55);
-  lit *= 1.0 - nightSide * 0.82;
-  float term = smoothstep(-0.04, 0.05, nl);   // crisp terminator
-  return mix(lit * 0.14, lit, term);
+  vec3 lit = surf * (nl * 1.25 + 0.03) * mix(1.0, 0.40, uNight * 0.55);
+  lit *= 1.0 - nightSide * 0.85;
+  float term = smoothstep(-0.06, 0.07, nl);
+  return mix(lit * 0.12, lit, term);
 }
 
 vec3 ringColour(vec3 ray, float tRing, float R, out float alpha){
@@ -143,7 +143,7 @@ vec3 stars(vec3 ray){
   vec2 starPos = vec2(hash21(cell + 7.1), hash21(cell + 3.7));
   float dist = length(f - starPos);
   float bright = smoothstep(0.08, 0.0, dist);
-  bright *= pow(h, 6.0) * 3.0;
+  bright *= pow(h, 5.0) * 4.2;
   /* twinkle */
   bright *= 0.7 + 0.3 * sin(uTime * (2.0 + h * 5.0) + h * 40.0);
   /* only above horizon-ish, denser near zenith */
@@ -267,6 +267,11 @@ void main(){
   planet *= haze * uPlanetGlow;
   col += stars(ray) * haze * (1.0 - planetCov);
   col += planet;
+
+  /* a soft luminous halo: the giant glows through the haze */
+  float pAng = acos(clamp(dot(ray, PLANET_DIR), -1.0, 1.0));
+  float halo = exp(-pow(pAng * 2.4, 2.0));
+  col += vec3(0.40, 0.50, 0.78) * halo * 0.24 * (1.0 - uNight * 0.55) * uPlanetGlow;
 
   /* clouds composite */
   vec4 cl = clouds(ray, uSunTint);

@@ -24,8 +24,7 @@ uniform vec3 uCamPos;
 uniform float uNight;
 vec3 applyLight(vec3 albedo, vec3 n, vec3 p){
   float ndl = clamp(dot(n, uLightDir), 0.0, 1.0);
-  ndl = floor(ndl * 3.0 + 0.5) / 3.0;      // flat cel bands
-  vec3 amb = mix(uGroundAmbient, uSkyAmbient, clamp(n.y * 0.5 + 0.5, 0.0, 1.0)) * 1.35;
+  vec3 amb = mix(uGroundAmbient, uSkyAmbient, clamp(n.y * 0.5 + 0.5, 0.0, 1.0)) * 1.2;
   vec3 lit = albedo * (uSunColor * ndl + amb);
   float fog = 1.0 - exp(-length(p - uCamPos) * uFogDensity);
   return mix(lit, uFogColor, fog);
@@ -116,13 +115,13 @@ ${LIGHT_CHUNK}
 void main(){
   vec3 n = normalize(vNormal);
   vec3 V = normalize(uCamPos - vWorld);
-  vec3 albedoTop = vec3(0.20, 0.18, 0.25);
-  vec3 albedoBel = vec3(0.58, 0.50, 0.40);
+  vec3 albedoTop = vec3(0.13, 0.12, 0.19);
+  vec3 albedoBel = vec3(0.62, 0.50, 0.38);
   float bel = clamp(-n.y, 0.0, 1.0);
   vec3 albedo = mix(albedoTop, albedoBel, bel * 0.85);
   float rim = pow(1.0 - clamp(dot(n, V), 0.0, 1.0), 2.5);
   vec3 lit = applyLight(albedo, n, vWorld);
-  lit += uSunColor * rim * 0.35;
+  lit += uSunColor * rim * 0.6;
   lit += uGlowColor * uGlowAmt;
   fragColor = vec4(lit, 1.0);
 }`;
@@ -1256,7 +1255,7 @@ export class Entities {
       gl.uniform3fv(this.blu.uCamRight, this._camRight);
       gl.uniform3fv(this.blu.uCamUp, this._camUp);
       gl.uniform1f(this.blu.uTime, this.time);
-      gl.uniform3f(this.blu.uColor, 1.65, 1.15, 0.5);
+      gl.uniform3f(this.blu.uColor, 1.9, 1.42, 0.64);
       let w = 0;
       for (const s of this.shardDraw) {
         this.billData[w++] = s.pos[0]; this.billData[w++] = s.pos[1]; this.billData[w++] = s.pos[2]; this.billData[w++] = 3.4;

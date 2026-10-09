@@ -12,11 +12,13 @@ giant, the lakes, the weather, the creatures, the wind and the music — is
 load, no libraries, no build step, and no network calls. View source: it's all
 just JavaScript, mathematics and one honest WebGL2 context.
 
-The whole world is drawn at a tiny internal resolution — a few hundred pixels
-across — and integer-upscaled, so every pixel is a crisp block. The frame is
-then snapped to a **hand-picked 28-colour palette with ordered dithering**
-(the classic one-bit dither is one setting away). Flat light bands, stencil
-shadows, no film grain: paint, not physics.
+The default look is **painted**: native resolution, painterly shading, a
+Hollow-Knight-flavoured grade — deep indigo shadows, warm gold highlights,
+strong bloom and vignette. Flip `O` → **STYLE** to **PIXEL** and the whole
+world is drawn at a tiny internal resolution — a few hundred pixels across —
+and integer-upscaled, so every pixel is a crisp block, optionally snapped to
+a **hand-picked 28-colour palette with ordered dithering** (the classic
+one-bit ink-and-bone dither is one setting away).
 
 ## Controls
 
@@ -29,7 +31,7 @@ shadows, no film grain: paint, not physics.
 | `H` | hide the interface |
 | `M` | mute |
 | `C` | photo mode (free camera) |
-| `O` | settings (pixel size, palette, sensitivity, quality, new flight) |
+| `O` | settings (style, pixel size, palette, sensitivity, quality, new flight) |
 | `F3` | flight data |
 
 **Gamepad** — left stick steers, RT (or A) burns light.
@@ -40,9 +42,11 @@ settings. Progress saves automatically to your browser, per seed.
 
 ### Looks
 
-`O` → **PIXEL SIZE** (chunky / classic / fine) and **PALETTE**
-(dusk / ember / mono / smooth; `mono` is pure one-bit ink-and-bone). They can
-also ride in the URL: `?pixel=chunky&palette=mono`.
+`O` → **STYLE** picks **PAINTED** (default) or **PIXEL**. In pixel style,
+**PIXEL SIZE** (chunky / classic / fine) sets the internal buffer and
+**PALETTE** snaps the frame (none / dusk / ember / mono; `mono` is pure
+one-bit ink-and-bone). They can also ride in the URL:
+`?style=pixel&pixel=chunky&palette=mono`.
 
 ### Photo mode
 
@@ -61,10 +65,11 @@ also the fuel you burn, so skim the dunes between beacons.
 - **Terrain** — a deterministic fractal height field (domain-warped fbm +
   ridged multifractals) sampled on the CPU, streamed as a quadtree of 3×3
   subdivided chunks with skirts, frustum-culled, with parent-mesh fallback so
-  the horizon never opens a hole while streaming. Shaded in flat painted
-  fields: three light bands, stencil shadows, no per-pixel noise.
-- **Shadows** — a 2048² sun-space depth map, one tap per pixel, refreshed
-  every frame: crisp dusk silhouettes, not soft blobs.
+  the horizon never opens a hole while streaming. Shaded smoothly with dune
+  ripples that fade with distance, slope-based cavity darkening and rich
+  painted colour fields.
+- **Shadows** — a 2048² sun-space depth map with 3×3 PCF, refreshed every
+  frame: crisp dusk silhouettes with soft edges.
 - **Water** — no mesh at all: each screen pixel raycasts the water plane,
   then hardware depth-testing against the terrain composite for occlusion,
   with fresnel, depth absorption, shoreline foam and distance-flattened waves.
@@ -80,9 +85,10 @@ also the fuel you burn, so skim the dunes between beacons.
   and sky-whales: vast, slow leviathans circling the high air.
 - **Lore stones** — weathered monoliths hidden in the world; glide close and
   they whisper. Find them all.
-- **Post** — low-res HDR pipeline (RGBA16F when available), threshold bloom,
-  radial god rays from the scene itself, ACES tonemap, warm grade, vignette,
-  photo filters, then palette quantisation with a 4×4 Bayer dither as the
+- **Post** — HDR pipeline (RGBA16F when available), threshold bloom, radial
+  god rays from the scene itself, ACES tonemap, then a high-contrast grade:
+  indigo shadows, saturated mids, warm gold highlights, strong vignette —
+  and, in pixel style, palette quantisation with a 4×4 Bayer dither as the
   final step. Resolution and shadow extent auto-tune to hold frame rate.
 - **Audio** — WebAudio synthesis: filtered-noise wind and rain tied to the
   weather, thunder, a pad that gains a voice with every beacon awakened and

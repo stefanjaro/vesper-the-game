@@ -16,11 +16,11 @@ import { WORLD } from './world.js';
    ──────────────────────────────────────────────────────────────────────────── */
 
 const STOPS = [
-  { e: 0.9,  sun: [2.45, 2.38, 2.18], zen: [0.19, 0.42, 0.80], hor: [0.62, 0.76, 0.92], ember: [0.55, 0.55, 0.62], fog: [0.66, 0.73, 0.86], sky: [0.38, 0.46, 0.60], gnd: [0.23, 0.18, 0.14], star: 0, aur: 0, night: 0, dusk: 0, cloud: [1.05, 1.0, 0.95] },
-  { e: 0.25, sun: [2.30, 1.85, 1.38], zen: [0.21, 0.40, 0.74], hor: [0.88, 0.72, 0.60], ember: [0.95, 0.58, 0.34], fog: [0.76, 0.66, 0.63], sky: [0.35, 0.40, 0.55], gnd: [0.21, 0.16, 0.12], star: 0, aur: 0, night: 0, dusk: 0.2, cloud: [1.1, 0.95, 0.82] },
-  { e: 0.0,  sun: [1.85, 0.78, 0.34], zen: [0.15, 0.22, 0.50], hor: [0.98, 0.50, 0.30], ember: [1.05, 0.44, 0.20], fog: [0.58, 0.42, 0.40], sky: [0.30, 0.28, 0.44], gnd: [0.16, 0.11, 0.10], star: 0.12, aur: 0, night: 0.08, dusk: 1.0, cloud: [1.15, 0.75, 0.55] },
-  { e: -0.1, sun: [0.55, 0.22, 0.14], zen: [0.07, 0.10, 0.26], hor: [0.34, 0.20, 0.28], ember: [0.60, 0.24, 0.20], fog: [0.20, 0.17, 0.25], sky: [0.17, 0.19, 0.32], gnd: [0.10, 0.08, 0.09], star: 0.65, aur: 0.45, night: 0.55, dusk: 0.45, cloud: [0.45, 0.38, 0.45] },
-  { e: -0.5, sun: [0.20, 0.30, 0.42], zen: [0.012, 0.018, 0.048], hor: [0.07, 0.095, 0.16], ember: [0.12, 0.10, 0.15], fog: [0.055, 0.075, 0.135], sky: [0.115, 0.15, 0.26], gnd: [0.055, 0.06, 0.075], star: 1, aur: 1, night: 1, dusk: 0, cloud: [0.22, 0.26, 0.37] },
+  { e: 0.9,  sun: [2.75, 2.35, 1.80], zen: [0.09, 0.22, 0.54], hor: [0.40, 0.58, 0.86], ember: [0.50, 0.50, 0.62], fog: [0.32, 0.44, 0.68], sky: [0.13, 0.20, 0.38], gnd: [0.070, 0.060, 0.105], star: 0, aur: 0, night: 0, dusk: 0, cloud: [1.05, 1.0, 0.95] },
+  { e: 0.25, sun: [2.55, 1.85, 1.18], zen: [0.10, 0.18, 0.44], hor: [0.92, 0.62, 0.42], ember: [1.00, 0.55, 0.30], fog: [0.55, 0.42, 0.44], sky: [0.145, 0.175, 0.32], gnd: [0.070, 0.055, 0.095], star: 0, aur: 0, night: 0, dusk: 0.25, cloud: [1.12, 0.92, 0.78] },
+  { e: 0.0,  sun: [2.35, 0.88, 0.30], zen: [0.065, 0.085, 0.27], hor: [0.98, 0.38, 0.26], ember: [1.15, 0.42, 0.18], fog: [0.33, 0.19, 0.28], sky: [0.115, 0.115, 0.26], gnd: [0.050, 0.045, 0.095], star: 0.15, aur: 0, night: 0.06, dusk: 1.0, cloud: [1.20, 0.72, 0.50] },
+  { e: -0.1, sun: [0.50, 0.20, 0.14], zen: [0.033, 0.048, 0.16], hor: [0.26, 0.16, 0.32], ember: [0.50, 0.20, 0.18], fog: [0.10, 0.10, 0.21], sky: [0.065, 0.085, 0.20], gnd: [0.030, 0.030, 0.065], star: 0.7, aur: 0.5, night: 0.6, dusk: 0.35, cloud: [0.30, 0.28, 0.40] },
+  { e: -0.5, sun: [0.20, 0.30, 0.50], zen: [0.008, 0.014, 0.042], hor: [0.040, 0.065, 0.155], ember: [0.09, 0.08, 0.15], fog: [0.040, 0.055, 0.120], sky: [0.075, 0.100, 0.220], gnd: [0.034, 0.044, 0.085], star: 1, aur: 1, night: 1, dusk: 0, cloud: [0.12, 0.15, 0.28] },
 ];
 
 function lerpArr(a, b, t) {
@@ -239,9 +239,9 @@ void main(){
   float ndh = clamp(dot(n, H), 0.0, 1.0);
   float spec = (pow(ndh, 240.0) * 1.35 + pow(ndh, 42.0) * 0.10) * detail * detail;
 
-  vec3 deep = vec3(0.10, 0.24, 0.27) * (uSkyAmbient * 2.4 + uGroundAmbient * 1.2);
+  vec3 deep = vec3(0.07, 0.18, 0.44) * (uSkyAmbient * 2.8 + uGroundAmbient * 1.6);
   float thick = max(terrainDist - waterDist, 0.0);
-  vec3 body = deep * (1.0 - exp(-thick * 0.28));
+  vec3 body = deep * (1.0 - exp(-thick * 0.26));
 
   vec3 col = mix(body, reflCol, fres);
   col += uSunColor * spec * (1.0 - uNight * 0.75);
@@ -349,6 +349,7 @@ uniform float uAberration;
 uniform float uFlash;       // white flash 0..1 for beacon ignition
 uniform vec2 uRes;
 uniform float uWarm;        // grade warmth (dusk boost)
+uniform float uNight;       // 0 day .. 1 night (softens the grade so night keeps detail)
 uniform float uFilter;      // photo filter: 0 natural 1 amber 2 nocturne 3 bleach 4 ember
 uniform float uPalette;     // 0 smooth 1 dusk 2 ember 3 mono
 
@@ -431,11 +432,6 @@ void main(){
   c += bloom * uBloomStrength;
   c += texture(uRays, uv).rgb * uRayStrength;
 
-  /* grading: warm highlights, teal-lifted shadows */
-  float lum = dot(c, vec3(0.299, 0.587, 0.114));
-  c = mix(c, c * vec3(1.07, 0.99, 0.90), uWarm * clamp(lum, 0.0, 1.0) * 0.7);
-  c += vec3(-0.008, 0.004, 0.014) * (1.0 - clamp(lum, 0.0, 1.0));
-
   /* photo filters */
   if (uFilter > 0.5) {
     if (uFilter < 1.5) {            /* amber */
@@ -453,15 +449,28 @@ void main(){
     }
   }
 
-  c = aces(c * 0.80);
+  c = aces(c * 0.78);
 
-  /* vignette (kept soft; the palette pass happens last) */
-  float vig = 1.0 - uVignette * smoothstep(0.45, 1.45, length(fromC) * 1.7);
+  /* ── grade: deep indigo shadows, warm gold highlights, rich saturation ──
+     the Hollow-Knight trick is contrast plus colour, not brightness.
+     at night the sink and contrast soften so terrain stays readable. */
+  float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  float sink = (1.0 - smoothstep(0.035, 0.30, lum)) * (1.0 - 0.40 * uNight);
+  c = mix(c, c * 0.46 + vec3(0.022, 0.040, 0.10), sink);
+  float sat = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  c = mix(vec3(sat), c, 1.34);
+  float pivot = mix(0.50, 0.26, uNight);
+  float amt = mix(1.18, 1.04, uNight);
+  c = clamp((c - pivot) * amt + pivot, 0.0, 1.0);
+  c = mix(c, c * vec3(1.07, 0.99, 0.92), uWarm * 0.55);
+
+  /* vignette */
+  float vig = 1.0 - uVignette * smoothstep(0.42, 1.42, length(fromC) * 1.7);
   c *= vig;
 
   c = mix(c, vec3(1.0), uFlash);
 
-  /* the whole frame snaps to a tiny hand-picked palette with ordered dither */
+  /* optional palette snap (pixel style) */
   c = quantize(c, uPalette > 2.5 ? 0.03 : 0.028);
 
   fragColor = vec4(c, 1.0);
@@ -500,9 +509,11 @@ export class Renderer {
     this.bloomLevels = 4;
     this.frames = 0;
     this.fpsEMA = 60;
-    this.capPixels = 480;       // longest side of the internal art buffer
-    this.palette = 1;           // 0 smooth, 1 dusk, 2 ember, 3 mono
+    this.capPixels = 480;       // longest side of the internal art buffer (pixel style)
+    this.palette = 0;           // 0 none, 1 dusk, 2 ember, 3 mono
     this.pixelScale = 1;        // integer upscale actually used
+    this.renderStyle = 'painted'; // 'painted' (native, painterly) | 'pixel'
+    this._styledPixel = null;
   }
 
   ensureTargets(w, h) {
@@ -542,19 +553,32 @@ export class Renderer {
     const env = game.env;
     const cam = game.camera;
 
-    /* sizing: render into a tiny art buffer and integer-upscale it.
-       The canvas CSS size becomes an exact multiple of the buffer so every
-       art pixel is a crisp square block. */
-    const cap = Math.max(160, Math.round(this.capPixels * (0.55 + 0.45 * this.quality)));
-    const scale = Math.max(1, Math.ceil(Math.max(game.width, game.height) / cap));
-    const w = Math.max(2, Math.round(game.width / scale));
-    const h = Math.max(2, Math.round(game.height / scale));
-    this.pixelScale = scale;
-    if (this.canvas.width !== w || this.canvas.height !== h) {
-      this.canvas.width = w; this.canvas.height = h;
-      const cw = w * scale, ch = h * scale;
-      this.canvas.style.width = cw + 'px';
-      this.canvas.style.height = ch + 'px';
+    /* sizing: two looks. 'painted' renders at native resolution; 'pixel'
+       renders into a tiny buffer that is integer-upscaled into crisp blocks. */
+    let w, h;
+    if (this.renderStyle === 'pixel') {
+      const cap = Math.max(160, Math.round(this.capPixels * (0.55 + 0.45 * this.quality)));
+      const scale = Math.max(1, Math.ceil(Math.max(game.width, game.height) / cap));
+      w = Math.max(2, Math.round(game.width / scale));
+      h = Math.max(2, Math.round(game.height / scale));
+      this.pixelScale = scale;
+      if (this.canvas.width !== w || this.canvas.height !== h || this._styledPixel !== true) {
+        this.canvas.width = w; this.canvas.height = h;
+        this.canvas.style.width = (w * scale) + 'px';
+        this.canvas.style.height = (h * scale) + 'px';
+        this._styledPixel = true;
+      }
+    } else {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2) * this.quality;
+      w = Math.max(2, Math.round(game.width * dpr));
+      h = Math.max(2, Math.round(game.height * dpr));
+      if (this.canvas.width !== w || this.canvas.height !== h || this._styledPixel !== false) {
+        this.canvas.width = w; this.canvas.height = h;
+        this.canvas.style.width = '100%';
+        this.canvas.style.height = '100%';
+        this._styledPixel = false;
+      }
+      this.pixelScale = 1;
     }
     this.ensureTargets(w, h);
 
@@ -743,7 +767,7 @@ void main(){
     /* bright pass → bloom0 */
     this.blit(this.brightProg, this.bu, this.bloomRTs[0].a, () => {
       gl.uniform1i(this.bu.uScene, 0);
-      gl.uniform1f(this.bu.uThreshold, 1.12);
+      gl.uniform1f(this.bu.uThreshold, 0.92);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.rts.scene.tex);
     });
@@ -797,15 +821,16 @@ void main(){
       bind('uBloom2', this.bloomRTs[2].a.tex, 3);
       bind('uBloom3', this.bloomRTs[3].a.tex, 4);
       bind('uRays', this.rts.ray.tex, 5);
-      gl.uniform1f(this.cu.uBloomStrength, 0.40);
-      gl.uniform1f(this.cu.uRayStrength, 0.26);
-      gl.uniform1f(this.cu.uVignette, 0.38);
+      gl.uniform1f(this.cu.uBloomStrength, 0.58);
+      gl.uniform1f(this.cu.uRayStrength, 0.34);
+      gl.uniform1f(this.cu.uVignette, 0.52);
       gl.uniform1f(this.cu.uGrain, 0.0);
       gl.uniform1f(this.cu.uTime, env.time);
       gl.uniform1f(this.cu.uAberration, 0.0);
       gl.uniform1f(this.cu.uFlash, game.flash);
       gl.uniform2f(this.cu.uRes, w, h);
       gl.uniform1f(this.cu.uWarm, 0.35 + 0.65 * env.dusk);
+      gl.uniform1f(this.cu.uNight, env.night);
       gl.uniform1f(this.cu.uFilter, game.photoFilter || 0);
       gl.uniform1f(this.cu.uPalette, this.palette);
     });
