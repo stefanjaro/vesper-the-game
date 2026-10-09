@@ -191,7 +191,7 @@ void main(){
   float nx = vnoise(rp + vec2(uTime * 0.008, uTime * 0.005) + vec2(e, 0.0));
   float nz = vnoise(rp + vec2(uTime * 0.008, uTime * 0.005) + vec2(0.0, e));
   vec3 ripple = normalize(vec3((n0 - nx) * 0.7, e, (n0 - nz) * 0.7));
-  vec3 n = normalize(nGeom + ripple * (0.10 * detailFade * clamp(nGeom.y, 0.0, 1.0)));
+  vec3 n = normalize(nGeom + ripple * (0.13 * detailFade * clamp(nGeom.y, 0.0, 1.0)));
 
   float slope = 1.0 - clamp(nGeom.y, 0.0, 1.0);
   float h = p.y;
@@ -219,11 +219,14 @@ void main(){
   col = mix(col, vec3(0.16, 0.20, 0.19) * (0.85 + 0.3 * vnoise(p.xz * 0.5)), submerged);
 
   float ndlGeom = dot(nGeom, uLightDir);
+  /* warm lit sand, cool shadowed sand: colour contrast across the dunes */
+  float shade = 1.0 - clamp(ndlGeom, 0.0, 1.0);
+  col *= mix(vec3(1.08, 1.00, 0.92), vec3(0.80, 0.88, 1.14), shade * 0.55);
   float sh = mix(1.0, shadowFactor(p, nGeom, ndlGeom), 0.85);
   float sunTerm = clamp(ndlGeom, 0.0, 1.0) * sh;
   /* cavity darkening: steep faces sink into the shadow colour */
-  float ao = 1.0 - 0.38 * smoothstep(0.22, 0.85, slope);
-  vec3 amb = mix(uGroundAmbient, uSkyAmbient, clamp(nGeom.y * 0.5 + 0.5, 0.0, 1.0)) * 1.15;
+  float ao = 1.0 - 0.26 * smoothstep(0.22, 0.85, slope);
+  vec3 amb = mix(uGroundAmbient, uSkyAmbient, clamp(nGeom.y * 0.5 + 0.5, 0.0, 1.0)) * 1.55;
   vec3 lit = col * (uSunColor * sunTerm + amb * ao);
 
   /* the manta's soft drop-shadow on the sand */

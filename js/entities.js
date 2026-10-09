@@ -24,7 +24,7 @@ uniform vec3 uCamPos;
 uniform float uNight;
 vec3 applyLight(vec3 albedo, vec3 n, vec3 p){
   float ndl = clamp(dot(n, uLightDir), 0.0, 1.0);
-  vec3 amb = mix(uGroundAmbient, uSkyAmbient, clamp(n.y * 0.5 + 0.5, 0.0, 1.0)) * 1.2;
+  vec3 amb = mix(uGroundAmbient, uSkyAmbient, clamp(n.y * 0.5 + 0.5, 0.0, 1.0)) * 1.5;
   vec3 lit = albedo * (uSunColor * ndl + amb);
   float fog = 1.0 - exp(-length(p - uCamPos) * uFogDensity);
   return mix(lit, uFogColor, fog);

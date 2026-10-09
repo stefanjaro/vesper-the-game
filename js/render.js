@@ -16,11 +16,11 @@ import { WORLD } from './world.js';
    ──────────────────────────────────────────────────────────────────────────── */
 
 const STOPS = [
-  { e: 0.9,  sun: [2.75, 2.35, 1.80], zen: [0.09, 0.22, 0.54], hor: [0.40, 0.58, 0.86], ember: [0.50, 0.50, 0.62], fog: [0.32, 0.44, 0.68], sky: [0.13, 0.20, 0.38], gnd: [0.070, 0.060, 0.105], star: 0, aur: 0, night: 0, dusk: 0, cloud: [1.05, 1.0, 0.95] },
-  { e: 0.25, sun: [2.55, 1.85, 1.18], zen: [0.10, 0.18, 0.44], hor: [0.92, 0.62, 0.42], ember: [1.00, 0.55, 0.30], fog: [0.55, 0.42, 0.44], sky: [0.145, 0.175, 0.32], gnd: [0.070, 0.055, 0.095], star: 0, aur: 0, night: 0, dusk: 0.25, cloud: [1.12, 0.92, 0.78] },
-  { e: 0.0,  sun: [2.35, 0.88, 0.30], zen: [0.065, 0.085, 0.27], hor: [0.98, 0.38, 0.26], ember: [1.15, 0.42, 0.18], fog: [0.33, 0.19, 0.28], sky: [0.115, 0.115, 0.26], gnd: [0.050, 0.045, 0.095], star: 0.15, aur: 0, night: 0.06, dusk: 1.0, cloud: [1.20, 0.72, 0.50] },
-  { e: -0.1, sun: [0.50, 0.20, 0.14], zen: [0.033, 0.048, 0.16], hor: [0.26, 0.16, 0.32], ember: [0.50, 0.20, 0.18], fog: [0.10, 0.10, 0.21], sky: [0.065, 0.085, 0.20], gnd: [0.030, 0.030, 0.065], star: 0.7, aur: 0.5, night: 0.6, dusk: 0.35, cloud: [0.30, 0.28, 0.40] },
-  { e: -0.5, sun: [0.20, 0.30, 0.50], zen: [0.008, 0.014, 0.042], hor: [0.040, 0.065, 0.155], ember: [0.09, 0.08, 0.15], fog: [0.040, 0.055, 0.120], sky: [0.075, 0.100, 0.220], gnd: [0.034, 0.044, 0.085], star: 1, aur: 1, night: 1, dusk: 0, cloud: [0.12, 0.15, 0.28] },
+  { e: 0.9,  sun: [2.55, 2.10, 1.55], zen: [0.09, 0.22, 0.54], hor: [0.38, 0.56, 0.85], ember: [0.50, 0.50, 0.62], fog: [0.36, 0.48, 0.72], sky: [0.11, 0.155, 0.315], gnd: [0.085, 0.070, 0.11], star: 0, aur: 0, night: 0, dusk: 0, cloud: [1.05, 1.0, 0.95] },
+  { e: 0.25, sun: [2.30, 1.62, 1.00], zen: [0.10, 0.18, 0.44], hor: [0.92, 0.62, 0.42], ember: [1.00, 0.55, 0.30], fog: [0.58, 0.45, 0.47], sky: [0.20, 0.23, 0.41], gnd: [0.10, 0.085, 0.135], star: 0, aur: 0, night: 0, dusk: 0.25, cloud: [1.12, 0.92, 0.78] },
+  { e: 0.0,  sun: [2.35, 0.88, 0.30], zen: [0.065, 0.085, 0.27], hor: [0.98, 0.38, 0.26], ember: [1.15, 0.42, 0.18], fog: [0.44, 0.29, 0.37], sky: [0.185, 0.175, 0.37], gnd: [0.095, 0.080, 0.145], star: 0.15, aur: 0, night: 0.06, dusk: 1.0, cloud: [1.20, 0.72, 0.50] },
+  { e: -0.1, sun: [0.50, 0.20, 0.14], zen: [0.033, 0.048, 0.16], hor: [0.26, 0.16, 0.32], ember: [0.50, 0.20, 0.18], fog: [0.16, 0.14, 0.26], sky: [0.125, 0.145, 0.31], gnd: [0.060, 0.060, 0.115], star: 0.7, aur: 0.5, night: 0.6, dusk: 0.35, cloud: [0.30, 0.28, 0.40] },
+  { e: -0.5, sun: [0.20, 0.30, 0.50], zen: [0.008, 0.014, 0.042], hor: [0.040, 0.065, 0.155], ember: [0.09, 0.08, 0.15], fog: [0.070, 0.090, 0.175], sky: [0.135, 0.165, 0.34], gnd: [0.065, 0.080, 0.15], star: 1, aur: 1, night: 1, dusk: 0, cloud: [0.12, 0.15, 0.28] },
 ];
 
 function lerpArr(a, b, t) {
@@ -85,7 +85,7 @@ export function computeEnv(dayT, time, sunBoost = 1, weather = null) {
     planetGlow: 1 - 0.8 * Math.max(dust, rain * 0.7),
     cloudCover: clamp01(0.34 + 0.08 * Math.sin(time * 0.004) + rain * 0.55 + dust * 0.1 - 0.05),
     windDir: [Math.cos(windAngle), 0, Math.sin(windAngle)],
-    fogDensity: 0.00023 + dust * 0.0022 + rain * 0.0011,
+    fogDensity: 0.00016 + dust * 0.0022 + rain * 0.0011,
     storm, rain, dust,
   };
   return env;
@@ -449,19 +449,20 @@ void main(){
     }
   }
 
-  c = aces(c * 0.78);
+  c = aces(c * mix(0.80, 0.96, uNight));
 
-  /* ── grade: deep indigo shadows, warm gold highlights, rich saturation ──
-     the Hollow-Knight trick is contrast plus colour, not brightness.
-     at night the sink and contrast soften so terrain stays readable. */
+  /* ── grade: indigo shadows, warm gold highlights, rich saturation ──
+     a soft, lifted contrast keeps shadow detail instead of clipping it. */
   float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  float sink = (1.0 - smoothstep(0.035, 0.30, lum)) * (1.0 - 0.40 * uNight);
-  c = mix(c, c * 0.46 + vec3(0.022, 0.040, 0.10), sink);
+  float sink = (1.0 - smoothstep(0.05, 0.34, lum)) * (1.0 - 0.35 * uNight);
+  c = mix(c, c * 0.66 + vec3(0.034, 0.052, 0.115), sink);
   float sat = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  c = mix(vec3(sat), c, 1.34);
-  float pivot = mix(0.50, 0.26, uNight);
-  float amt = mix(1.18, 1.04, uNight);
-  c = clamp((c - pivot) * amt + pivot, 0.0, 1.0);
+  c = mix(vec3(sat), c, 1.30);
+  float pivot = mix(0.46, 0.28, uNight);
+  float amt = mix(1.12, 1.02, uNight);
+  /* soft S: never crushes to pure black, never clips to white */
+  float k = amt - 1.0;
+  c = clamp(c + k * c * (1.0 - c) * (c - pivot), 0.0, 1.0);
   c = mix(c, c * vec3(1.07, 0.99, 0.92), uWarm * 0.55);
 
   /* vignette */
@@ -823,7 +824,7 @@ void main(){
       bind('uRays', this.rts.ray.tex, 5);
       gl.uniform1f(this.cu.uBloomStrength, 0.58);
       gl.uniform1f(this.cu.uRayStrength, 0.34);
-      gl.uniform1f(this.cu.uVignette, 0.52);
+      gl.uniform1f(this.cu.uVignette, 0.40);
       gl.uniform1f(this.cu.uGrain, 0.0);
       gl.uniform1f(this.cu.uTime, env.time);
       gl.uniform1f(this.cu.uAberration, 0.0);
