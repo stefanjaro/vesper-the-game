@@ -1165,9 +1165,11 @@ export class Entities {
       gl.useProgram(this.birdProg);
       this.setLightUniforms(this.bu2, env, viewProj, cam);
       gl.uniform1f(this.bu2.uTime, this.time);
+      gl.bindVertexArray(this.birdMesh.vao);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.birdInstBuf);
       gl.bufferData(gl.ARRAY_BUFFER, this.birdData.subarray(0, this.birdCount * 8), gl.DYNAMIC_DRAW);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, this.birdMesh.count, this.birdCount);
+      gl.bindVertexArray(null);
     }
 
     gl.useProgram(this.beaconProg);
@@ -1204,9 +1206,11 @@ export class Entities {
         this.crystalData[w++] = c.rot; this.crystalData[w++] = glow; this.crystalData[w++] = 0; this.crystalData[w++] = 0;
       }
       this.crystalCount = w / 8;
+      gl.bindVertexArray(this.crystalMesh.vao);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.crystalInstBuf);
       gl.bufferData(gl.ARRAY_BUFFER, this.crystalData.subarray(0, w), gl.DYNAMIC_DRAW);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, this.crystalMesh.count, this.crystalCount);
+      gl.bindVertexArray(null);
     }
   }
 
@@ -1257,21 +1261,26 @@ export class Entities {
         this.billData[w++] = s.pos[0]; this.billData[w++] = s.pos[1]; this.billData[w++] = s.pos[2]; this.billData[w++] = 3.4;
         this.billData[w++] = s.ph; this.billData[w++] = 1; this.billData[w++] = 0; this.billData[w++] = 1;
       }
+      gl.bindVertexArray(this.billMesh.vao);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.billInstBuf);
       gl.bufferData(gl.ARRAY_BUFFER, this.billData.subarray(0, w), gl.DYNAMIC_DRAW);
       gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, w / 8);
+      gl.bindVertexArray(null);
     }
 
     /* pillars */
     gl.useProgram(this.pillarProg);
     gl.uniformMatrix4fv(this.pu.uViewProj, false, viewProj);
+    gl.uniform3fv(this.pu.uCamPos, cam.pos);
     gl.uniform1f(this.pu.uTime, this.time);
     for (const b of this.beacons) {
       if (b.lit <= 0.01) continue;
       this.pillarInst[0] = b.pos[0]; this.pillarInst[1] = b.pos[1] + 10; this.pillarInst[2] = b.pos[2]; this.pillarInst[3] = 4.5;
+      gl.bindVertexArray(this.pillarMesh.vao);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.pillarInstBuf);
       gl.bufferData(gl.ARRAY_BUFFER, this.pillarInst, gl.DYNAMIC_DRAW);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, this.pillarMesh.count, 1);
+      gl.bindVertexArray(null);
     }
 
     /* particles */
