@@ -68,6 +68,16 @@ export class AudioEngine {
       this.windGain.connect(this.master);
       this.windGain.connect(this.verb);
 
+      /* ── rain hiss ── */
+      this.rainGain = ctx.createGain();
+      this.rainGain.gain.value = 0;
+      const rainFilter = ctx.createBiquadFilter();
+      rainFilter.type = 'highpass';
+      rainFilter.frequency.value = 1400;
+      const rainNoise = this.noiseSource();
+      rainNoise.connect(rainFilter).connect(this.rainGain);
+      this.rainGain.connect(this.master);
+
       /* ── pad: three voices per chord tone, detuned, lowpassed ── */
       this.padGain = ctx.createGain();
       this.padGain.gain.value = 0.16;
@@ -104,6 +114,8 @@ export class AudioEngine {
 
       this.ready = true;
       this.chordIndex = 0;
+      this.activeVoices = 2;       // grows with every beacon awakened
+      this.progress = 0;
       this.nextChordAt = ctx.currentTime + 0.5;
       this.nextPluckAt = ctx.currentTime + 3;
       this.startPad();
@@ -143,13 +155,72 @@ export class AudioEngine {
     const ctx = this.ctx;
     const chord = CHORDS[ci % CHORDS.length];
     const octaves = [0, 0, 1, 0, 1, 2];
+    const active = this.activeVoices || 6;
     for (let v = 0; v < this.padOscs.length; v++) {
       const { o, g } = this.padOscs[v];
       const semitone = chord[v % chord.length] + 12 * octaves[v];
       const f = midiToFreq(50 + semitone) * (1 + (v % 2 ? 0.0016 : -0.0016));
       o.frequency.setTargetAtTime(f, when, 2.2);
-      g.gain.setTargetAtTime(v < 3 ? 0.16 : 0.10, when, 2.6);
+      g.gain.setTargetAtTime(v < active ? (v < 3 ? 0.16 : 0.10) : 0, when, 2.6);
     }
+  }
+
+  /* every awakened beacon adds a voice and lets the score breathe faster */
+  setProgress(n) {
+    this.progress = n;
+    this.activeVoices = Math.min(6, 2 + n);
+    if (this.ready) {
+      const t = this.ctx.currentTime;
+      for (let v = 0; v < this.padOscs.length; v++) {
+        const { g } = this.padOscs[v];
+        const on = v < this.activeVoices;
+        g.gain.setTargetAtTime(on ? (v < 3 ? 0.16 : 0.10) : 0, t, 1.6);
+      }
+    }
+  }
+
+  thunder() {
+    if (!this.ready || this.muted) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const len = ctx.sampleRate * 1.8;
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) {
+      const x = i / len;
+      d[i] = (Math.random() * 2 - 1) * Math.pow(1 - x, 2.1);
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 300; lp.Q.value = 0.7;
+    const g = ctx.createGain();
+    g.gain.value = 0.55;
+    src.connect(lp).connect(g).connect(this.master);
+    g.connect(this.verb);
+    src.start(t);
+    const o = ctx.createOscillator();
+    o.type = 'sine'; o.frequency.value = 40;
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.20, t);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 1.3);
+    o.connect(og).connect(this.master);
+    o.start(t); o.stop(t + 1.5);
+  }
+
+  eclipse() {
+    if (!this.ready || this.muted) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    [32, 43, 55].forEach((m) => {
+      const o = ctx.createOscillator();
+      o.type = 'sine'; o.frequency.value = midiToFreq(m);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.09, t + 2.5);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 16);
+      o.connect(g).connect(this.master);
+      o.connect(g).connect(this.verb);
+      o.start(t); o.stop(t + 17);
+    });
   }
 
   /* called every frame from the game */
@@ -159,21 +230,28 @@ export class AudioEngine {
     const t = ctx.currentTime;
     const ship = game.ship;
 
-    /* wind follows airspeed + altitude */
-    const spd = ship ? clamp(ship.speed / 80, 0.1, 1.1) : 0.2;
-    const wTarget = (game.state === 'flying' ? 0.05 + spd * 0.24 : 0.03) * (game.paused ? 0.4 : 1);
-    this.windGain.gain.setTargetAtTime(wTarget, t, 0.7);
-    this.windFilter.frequency.setTargetAtTime(320 + spd * 950 + Math.sin(t * 0.7) * 60, t, 0.5);
+    /* weather bed */
+    const storm = game.weather ? game.weather.storm : 0;
+    const rain = game.weather ? game.weather.rain : 0;
 
-    /* pad brightness follows night + speed */
-    const bright = lerp(1500, 500, game.env.night) + spd * 700;
+    /* wind follows airspeed + weather */
+    const spd = ship ? clamp(ship.speed / 80, 0.1, 1.1) : 0.2;
+    const wTarget = (game.state === 'flying' ? 0.05 + spd * 0.24 : 0.03)
+      * (game.paused ? 0.4 : 1) * (1 + storm * 1.6);
+    this.windGain.gain.setTargetAtTime(wTarget, t, 0.7);
+    const gust = Math.sin(t * 0.7) * 60 + Math.sin(t * 1.9 + 1.2) * 30 * storm;
+    this.windFilter.frequency.setTargetAtTime((280 + spd * 900) * (1 - storm * 0.42) + gust, t, 0.5);
+    this.rainGain.gain.setTargetAtTime(rain * 0.12, t, 0.9);
+
+    /* pad brightness follows night, speed and progress */
+    const bright = lerp(1500, 500, game.env.night) + spd * 700 + (this.progress || 0) * 130;
     this.padFilter.frequency.setTargetAtTime(bright, t, 1.2);
 
-    /* chord progression */
+    /* chord progression quickens as the world wakes */
     if (t >= this.nextChordAt) {
       this.setChord(this.chordIndex, t);
       this.chordIndex = (this.chordIndex + 1) % CHORDS.length;
-      this.nextChordAt = t + 13;
+      this.nextChordAt = t + lerp(16, 8, (this.progress || 0) / 5);
       /* sub follows root of chord */
       const rootSemis = CHORDS[(this.chordIndex - 1 + CHORDS.length) % CHORDS.length][0];
       this.subOsc.frequency.setTargetAtTime(midiToFreq(38 + rootSemis), t, 1.8);

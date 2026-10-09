@@ -12,6 +12,7 @@ import { Game } from './game.js';
 
 const params = new URLSearchParams(location.search);
 const P = (k, d) => (params.has(k) ? parseFloat(params.get(k)) : d);
+const seedName = (params.get('seed') || 'vesper-dawn').slice(0, 64);
 
 const canvas = document.getElementById('gl');
 const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, powerPreference: 'high-performance' });
@@ -22,13 +23,22 @@ if (!gl) {
   throw new Error('no webgl2');
 }
 
+/* a lost GPU context should not leave the player staring at a dead canvas */
+canvas.addEventListener('webglcontextlost', (e) => {
+  e.preventDefault();
+  const el = document.getElementById('err');
+  el.style.display = 'block';
+  el.textContent = 'The graphics context was lost — restoring the world…';
+  setTimeout(() => location.reload(), 900);
+});
+
 window.addEventListener('error', (e) => {
   const el = document.getElementById('err');
   el.style.display = 'block';
   el.textContent += (el.textContent ? '\n' : '') + String(e.message || e);
 });
 
-const rng = mulberry32(hashString('vesper-dawn'));
+const rng = mulberry32(hashString(seedName));
 
 /* ── spawn: a dune-belt valley with mountains as a backdrop ── */
 let spawn = [0, 0, 0];
@@ -60,14 +70,26 @@ const sky = new Sky(gl);
 const renderer = new Renderer(gl, canvas);
 renderer.attach(terrain, sky);
 const entities = new Entities(gl);
-entities.populate(spawn);
+entities.populate(spawn, (hashString(seedName) ^ 0x9e3779b9) >>> 0);
 const audio = new AudioEngine();
 
 const game = new Game({
-  renderer, terrain, sky, entities, audio, canvas, spawn,
+  renderer, terrain, sky, entities, audio, canvas, gl, spawn,
   envFn: computeEnv,
   dayT: P('t', 0.93),
+  seedName,
 });
+game.saveKey = 'vesper:save:' + seedName;
+game.loadGame();
+
+/* stored options */
+const OPT_KEY = 'vesper:opts';
+let opts = { sens: 1, invert: false, autoq: true, quality: 1 };
+try { opts = Object.assign(opts, JSON.parse(localStorage.getItem(OPT_KEY) || '{}')); } catch (e) {}
+game.input.sensitivity = opts.sens;
+game.input.invertY = !!opts.invert;
+if (!opts.autoq) { renderer.quality = opts.quality; game.qualityLock = true; }
+
 window.__game = game;
 window.__terrain = terrain;
 window.__renderer = renderer;
@@ -105,8 +127,10 @@ function frame() {
     tuneTimer += dt;
     if (tuneTimer > 2.5) {
       tuneTimer = 0;
-      if (game.fps < 34 && renderer.quality > 0.62) renderer.quality = Math.max(0.62, renderer.quality - 0.13);
-      else if (game.fps > 55 && renderer.quality < 1.0) renderer.quality = Math.min(1.0, renderer.quality + 0.06);
+      if (!game.qualityLock) {
+        if (game.fps < 34 && renderer.quality > 0.62) renderer.quality = Math.max(0.62, renderer.quality - 0.13);
+        else if (game.fps > 55 && renderer.quality < 1.0) renderer.quality = Math.min(1.0, renderer.quality + 0.06);
+      }
       game.stats.chunks = terrain.drawList.length;
     }
     statTimer += dt;
@@ -136,6 +160,59 @@ addEventListener('keydown', (e) => {
     game.showStats = !game.showStats;
   }
 });
+
+/* ── settings overlay ── */
+const overlay = document.getElementById('settings');
+const setMeta = document.getElementById('set-meta');
+const OPT_KEY_CHECK = () => { try { localStorage.setItem(OPT_KEY, JSON.stringify(opts)); } catch (e) {} };
+function openSettings(open) {
+  overlay.classList.toggle('on', open);
+  if (open && setMeta) {
+    setMeta.textContent = `seed “${seedName}” · ${game.beaconsLit} / 5 beacons · ${game.foundLore || 0} stones found`;
+  }
+}
+addEventListener('keydown', (e) => {
+  if (e.code === 'KeyO') openSettings(!overlay.classList.contains('on'));
+  if (e.code === 'Escape' && overlay.classList.contains('on')) openSettings(false);
+});
+document.getElementById('set-close').addEventListener('click', () => openSettings(false));
+document.getElementById('set-sens').addEventListener('input', (e) => {
+  opts.sens = parseFloat(e.target.value);
+  game.input.sensitivity = opts.sens;
+  OPT_KEY_CHECK();
+});
+document.getElementById('set-invert').addEventListener('change', (e) => {
+  opts.invert = e.target.checked;
+  game.input.invertY = opts.invert;
+  OPT_KEY_CHECK();
+});
+document.getElementById('set-autoq').addEventListener('change', (e) => {
+  opts.autoq = e.target.checked;
+  game.qualityLock = !opts.autoq;
+  if (opts.autoq) { renderer.quality = 1; opts.quality = 1; document.getElementById('set-quality').value = 1; }
+  OPT_KEY_CHECK();
+});
+document.getElementById('set-quality').addEventListener('input', (e) => {
+  opts.quality = parseFloat(e.target.value);
+  renderer.quality = opts.quality;
+  if (opts.autoq) {
+    opts.autoq = false;
+    game.qualityLock = true;
+    document.getElementById('set-autoq').checked = false;
+  }
+  OPT_KEY_CHECK();
+});
+document.getElementById('set-new').addEventListener('click', () => {
+  try { localStorage.removeItem(game.saveKey); } catch (e) {}
+  location.reload();
+});
+document.getElementById('set-sens').value = opts.sens;
+document.getElementById('set-invert').checked = !!opts.invert;
+document.getElementById('set-autoq').checked = !!opts.autoq;
+document.getElementById('set-quality').value = opts.quality;
+
+/* save the day position on the way out */
+addEventListener('beforeunload', () => game.saveGame());
 
 /* test hooks */
 window.__sim = (steps, dt = 0.016) => game.stepSim(steps, dt);

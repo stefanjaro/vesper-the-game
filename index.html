@@ -90,6 +90,83 @@
     border-radius: 50%; background: rgba(255,255,255,0.5);
     box-shadow: 0 0 6px rgba(255,255,255,0.4);
   }
+  #energy { left: 4vw; bottom: 6.0vh; width: 156px; }
+  #energy .cap { font-size: 0.56rem; letter-spacing: 0.3em; color: rgba(238,224,196,0.55); }
+  #energy .bar {
+    margin-top: 0.42rem; height: 3px; border-radius: 2px;
+    background: rgba(238,224,196,0.16); overflow: hidden;
+  }
+  #energy .bar i {
+    display: block; height: 100%; width: 30%;
+    background: linear-gradient(90deg, #d99a4e, #ffe6b0);
+    box-shadow: 0 0 9px rgba(255, 210, 140, 0.75);
+    transition: width 0.12s linear, background 0.3s ease;
+  }
+  #energy .bar i.low { background: linear-gradient(90deg, #b8402a, #ff9e6a); }
+  #compass .marker.ready { background: #ffe9b8; box-shadow: 0 0 14px rgba(255, 230, 160, 1); }
+
+  #charge {
+    position: fixed; left: 0; right: 0; bottom: 13vh; z-index: 6;
+    text-align: center; font-size: 0.72rem; letter-spacing: 0.34em; text-indent: 0.34em;
+    color: #ffe2ae; text-shadow: 0 0 18px rgba(255, 190, 110, 0.65);
+    opacity: 0; transition: opacity 0.4s ease; pointer-events: none;
+  }
+  #charge.on { opacity: 1; animation: pulse 1.4s ease-in-out infinite; }
+  #lore {
+    position: fixed; left: 12vw; right: 12vw; bottom: 18vh; z-index: 6;
+    text-align: center; font-style: italic; font-size: 0.95rem;
+    letter-spacing: 0.08em; color: #efe2c6;
+    text-shadow: 0 1px 16px rgba(0,0,0,0.9), 0 0 30px rgba(255,200,120,0.25);
+    opacity: 0; transition: opacity 1.2s ease; pointer-events: none;
+  }
+  #lore.on { opacity: 1; }
+
+  #boost-btn {
+    position: fixed; right: 5vw; bottom: 9vh; z-index: 6;
+    width: 92px; height: 92px; border-radius: 50%;
+    border: 1px solid rgba(255, 220, 160, 0.45);
+    background: radial-gradient(circle at 38% 32%, rgba(255,225,170,0.28), rgba(120,80,40,0.12) 68%);
+    color: rgba(245, 230, 196, 0.85); font: inherit; font-size: 0.6rem; letter-spacing: 0.28em;
+    text-indent: 0.28em; display: none; align-items: center; justify-content: center;
+    pointer-events: auto; touch-action: none; user-select: none;
+    opacity: 0; transition: opacity 0.8s ease;
+  }
+  @media (hover: none) and (pointer: coarse) {
+    #boost-btn { display: flex; }
+    #hud.on ~ #boost-btn { opacity: 0.85; }
+  }
+
+  #photo-bar {
+    position: fixed; left: 50%; bottom: 3.2vh; transform: translateX(-50%); z-index: 7;
+    display: flex; gap: 1.6rem; align-items: baseline;
+    padding: 0.6rem 1.4rem; border-radius: 999px;
+    border: 1px solid rgba(238, 224, 196, 0.18);
+    background: rgba(8, 10, 16, 0.55); backdrop-filter: blur(6px);
+    font-size: 0.62rem; letter-spacing: 0.22em; color: rgba(238, 224, 196, 0.8);
+    opacity: 0; pointer-events: none; transition: opacity 0.6s ease;
+    white-space: nowrap;
+  }
+  #photo-bar.on { opacity: 1; }
+  #photo-bar .pf-title { color: #f2d9a4; }
+  #photo-bar .pf-help { color: rgba(238, 224, 196, 0.48); letter-spacing: 0.12em; }
+
+  .overlay label {
+    display: flex; align-items: center; gap: 1rem; justify-content: space-between;
+    width: min(420px, 80vw); margin-top: 1.1rem;
+    font-size: 0.72rem; letter-spacing: 0.24em; color: #cfc0a2;
+  }
+  .overlay input[type=range] { width: 170px; accent-color: #d9a75e; }
+  .overlay input[type=checkbox] { accent-color: #d9a75e; width: 18px; height: 18px; }
+  .overlay .buttons { display: flex; gap: 1rem; margin-top: 1.6rem; }
+  .overlay button {
+    font: inherit; font-size: 0.72rem; letter-spacing: 0.26em; text-indent: 0.26em;
+    padding: 0.7rem 1.5rem; border-radius: 2px; cursor: pointer;
+    color: #f2e8d5; background: rgba(255, 220, 160, 0.08);
+    border: 1px solid rgba(255, 220, 160, 0.35);
+    transition: background 0.3s ease;
+  }
+  .overlay button:hover { background: rgba(255, 220, 160, 0.2); }
+  .overlay .meta { margin-top: 1.4rem; font-size: 0.66rem; letter-spacing: 0.18em; color: rgba(183, 169, 141, 0.7); }
 
   .overlay {
     position: fixed; inset: 0; z-index: 20;
@@ -133,16 +210,41 @@
   every dune, cloud, star and note — generated live in your browser · no assets · no libraries
 </div>
 <div class="hint" id="tips" style="animation:none;opacity:0;transition:opacity 2s ease;pointer-events:none">
-  steer with the mouse · shift burns light · spiralling dust lifts you · the compass points to a beacon
+  steer with the mouse · shift burns light · the compass points to a beacon · C photo · O options
 </div>
 
 <div id="hud">
   <div class="dial" id="alt">ALTITUDE 000 M</div>
   <div class="dial" id="speed">AIRSPEED 00 M/S</div>
+  <div class="dial" id="energy"><div class="cap">LIGHT IN WING</div><div class="bar"><i id="energy-fill"></i></div></div>
   <div id="shards"><span class="n">0</span>LIGHT</div>
   <div id="beacons">BEACONS AWAKENED 0 / 5</div>
   <div id="compass"><div class="marker"></div><div class="label"></div></div>
   <div id="center-dot"></div>
+</div>
+<div id="charge">THE BEACON STIRS</div>
+<div id="lore"></div>
+<button id="boost-btn" type="button" aria-label="Burn light for speed">BURN</button>
+
+<div id="photo-bar">
+  <span class="pf-title">PHOTO</span>
+  <span id="photo-fov">FOV 64°</span>
+  <span id="photo-filter">NATURAL</span>
+  <span class="pf-help">WASD / Q E fly · scroll zoom · [ ] sun · F filter · F2 save · C exit</span>
+</div>
+
+<div class="overlay" id="settings">
+  <h2>SETTINGS</h2>
+  <label>LOOK SENSITIVITY <input type="range" id="set-sens" min="0.4" max="2.4" step="0.05" value="1"></label>
+  <label>INVERT VERTICAL <input type="checkbox" id="set-invert"></label>
+  <label>AUTO QUALITY <input type="checkbox" id="set-autoq" checked></label>
+  <label>QUALITY <input type="range" id="set-quality" min="0.5" max="1" step="0.05" value="1"></label>
+  <p class="meta" id="set-meta">seed — · 0 / 5 beacons</p>
+  <div class="buttons">
+    <button id="set-new">NEW FLIGHT</button>
+    <button id="set-close">CLOSE</button>
+  </div>
+  <p class="meta">progress is saved for this world · O closes</p>
 </div>
 
 <div class="overlay" id="pause"><h2>DRIFTING</h2><p>press P or click to continue</p></div>

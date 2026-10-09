@@ -183,14 +183,16 @@ void main(){
   vec3 n = nGeom;
   vec3 p = vWorld;
 
-  /* drifting micro-ripples in the sand */
+  /* drifting micro-ripples in the sand, faded with distance to stop aliasing */
+  float viewDist = length(p - uCamPos);
+  float detailFade = clamp(1.0 - viewDist / 2600.0, 0.12, 1.0);
   vec2 rp = p.xz * 0.16;
   float e = 0.35;
   float n0 = vnoise(rp + vec2(uTime * 0.01, uTime * 0.007));
   float nx = vnoise(rp + vec2(uTime * 0.01, uTime * 0.007) + vec2(e, 0.0));
   float nz = vnoise(rp + vec2(uTime * 0.01, uTime * 0.007) + vec2(0.0, e));
   vec3 ripple = normalize(vec3((n0 - nx) * 0.6, e, (n0 - nz) * 0.6));
-  float rippleAmt = clamp(n.y, 0.0, 1.0) * 0.12;
+  float rippleAmt = clamp(n.y, 0.0, 1.0) * 0.09 * detailFade;
   n = normalize(n + ripple * rippleAmt);
 
   float slope = 1.0 - clamp(n.y, 0.0, 1.0);
@@ -202,18 +204,20 @@ void main(){
   vec3 salt  = vec3(0.80, 0.77, 0.71);
   vec3 oasis = vec3(0.33, 0.40, 0.21);
 
-  float grain = vnoise(p.xz * 0.9);
-  vec3 col = mix(sandB, sandA, grain * 0.55 + 0.25);
+  float grain = (vnoise(p.xz * 0.9) - 0.5) * (0.35 + 0.45 * detailFade);
+  vec3 col = mix(sandB, sandA, 0.5 + grain * 0.9);
   col = mix(col, col * vec3(1.06, 0.97, 0.9), vnoise(p.xz * 0.013) * 0.8);
 
   col = mix(col, rock * (0.8 + 0.4 * vnoise(p.xz * 0.4)), smoothstep(0.22, 0.55, slope));
 
   float nearWater = smoothstep(uWaterLevel + 6.0, uWaterLevel + 0.5, h);
-  float below = step(h, uWaterLevel + 0.3);
   col = mix(col, salt * (0.9 + 0.2 * vnoise(p.xz * 0.7)), nearWater * (1.0 - smoothstep(0.3, 0.5, slope)) * 0.9);
-  float fringe = smoothstep(uWaterLevel + 0.4, uWaterLevel + 2.5, h) * (1.0 - nearWater);
-  col = mix(col, oasis, fringe * (1.0 - smoothstep(0.18, 0.42, slope)) * 0.75);
-  if (below > 0.5) col = salt * 0.7;
+  /* a narrow green ribbon just above the waterline, not the whole desert */
+  float fringe = smoothstep(uWaterLevel + 3.2, uWaterLevel + 0.9, h);
+  col = mix(col, oasis, fringe * (1.0 - smoothstep(0.18, 0.42, slope)) * 0.72);
+  /* lakebeds shade down into the depths instead of a hard salt plane */
+  float submerged = smoothstep(uWaterLevel + 0.2, uWaterLevel - 3.0, h);
+  col = mix(col, vec3(0.16, 0.20, 0.19) * (0.85 + 0.3 * vnoise(p.xz * 0.5)), submerged);
 
   float ndlGeom = dot(nGeom, uLightDir);
   float ndl = dot(n, uLightDir);
@@ -253,6 +257,37 @@ void main(){ fragColor = vec4(1.0); }`;
 
 const IDENTITY4 = (() => { const m = new Float32Array(16); m[0] = m[5] = m[10] = m[15] = 1; return m; })();
 
+/* clip-space plane extraction (Gribb–Hartmann), column-major viewProj */
+function extractPlanes(m, out) {
+  const row = (r) => [m[r], m[4 + r], m[8 + r], m[12 + r]];
+  const r0 = row(0), r1 = row(1), r2 = row(2), r3 = row(3);
+  const put = (i, a, b, s) => {
+    out[i * 4 + 0] = a[0] + s * b[0];
+    out[i * 4 + 1] = a[1] + s * b[1];
+    out[i * 4 + 2] = a[2] + s * b[2];
+    out[i * 4 + 3] = a[3] + s * b[3];
+  };
+  put(0, r3, r0, 1);   // left
+  put(1, r3, r0, -1);  // right
+  put(2, r3, r1, 1);   // bottom
+  put(3, r3, r1, -1);  // top
+  put(4, r3, r2, 1);   // near
+  put(5, r3, r2, -1);  // far
+  return out;
+}
+
+function aabbVisible(planes, minX, minY, minZ, maxX, maxY, maxZ) {
+  for (let i = 0; i < 6; i++) {
+    const a = planes[i * 4], b = planes[i * 4 + 1], c = planes[i * 4 + 2], d = planes[i * 4 + 3];
+    /* p-vertex: corner furthest along the plane normal */
+    const px = a >= 0 ? maxX : minX;
+    const py = b >= 0 ? maxY : minY;
+    const pz = c >= 0 ? maxZ : minZ;
+    if (a * px + b * py + c * pz + d < 0) return false;
+  }
+  return true;
+}
+
 /* ── Terrain: quadtree streaming ──────────────────────────────────────────── */
 
 export class Terrain {
@@ -265,6 +300,7 @@ export class Terrain {
     this.indices = buildIndices();
     this.nodes = new Map();      // key → node
     this.buildQueue = [];
+    this.fallbackSet = new Set();
     this.shadowMapSize = 2048;
     this.shadowTex = null;
     this.shadowFbo = null;
@@ -366,6 +402,7 @@ export class Terrain {
     this.frame++;
     this.buildQueue.length = 0;
     this.visited.clear();
+    this.fallbackSet.clear();
     this.drawList.length = 0;
 
     const wantNode = (l, gx, gz) => {
@@ -378,7 +415,21 @@ export class Terrain {
         this.nodes.set(k, node);
       }
       node.lastSeen = this.frame;
-      this.drawList.push(node);
+      /* freshly split chunks may not be built yet: fall back to the nearest
+         built ancestor so the world never opens a hole while streaming. */
+      let drawNode = node;
+      if (!node.mesh) {
+        let al = l + 1, agx = Math.floor(gx / 3), agz = Math.floor(gz / 3);
+        while (al <= MAX_LEVEL) {
+          const an = this.nodes.get(this.key(al, agx, agz));
+          if (an && an.mesh) { drawNode = an; an.lastSeen = this.frame; break; }
+          agx = Math.floor(agx / 3); agz = Math.floor(agz / 3); al++;
+        }
+      }
+      if (!this.fallbackSet.has(drawNode.key)) {
+        this.fallbackSet.add(drawNode.key);
+        this.drawList.push(drawNode);
+      }
       return node;
     };
 
@@ -492,26 +543,25 @@ export class Terrain {
     gl.uniform1f(this.u.uWaterLevel, WORLD.WATER_LEVEL);
     gl.uniform1f(this.u.uTime, env.time);
     gl.uniform1f(this.u.uShadowTexel, 1 / this.shadowMapSize);
-    gl.uniform1f(this.u.uShadowExtent, this.shadowExtentM || 320);
+    gl.uniform1f(this.u.uShadowExtent, env.shadowExtent || 320);
     gl.uniformMatrix4fv(this.u.uLightViewProjM, false, this.lightViewProj);
     gl.uniform3fv(this.u.uGliderPos, env.gliderPos || [0, 0, 0]);
     gl.uniform1f(this.u.uSunVisibility, env.sunVisibility !== undefined ? env.sunVisibility : 1);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.shadowTex);
     gl.uniform1i(this.u.uShadowMap, 0);
+    this._planes = this._planes || new Float32Array(24);
+    extractPlanes(env.viewProj, this._planes);
+    let draws = 0, culled = 0;
     for (const n of this.drawList) {
       if (!n.mesh) continue;
+      if (!aabbVisible(this._planes, n.minX, -400, n.minZ, n.minX + n.size, 1100, n.minZ + n.size)) { culled++; continue; }
       gl.uniform2f(this.u.uWorldOffset, n.minX, n.minZ);
       gl.uniform1f(this.u.uSpacing, n.spacing);
-      if (this.skirtOnly) {
-        gl.drawElementsInstanced ? null : null;
-        const base = n.mesh.gridIndexCount;
-        gl.bindVertexArray(n.mesh.vao);
-        gl.drawElements(gl.TRIANGLES, n.mesh.count - base, gl.UNSIGNED_INT, base * 4);
-        gl.bindVertexArray(null);
-      } else {
-        n.mesh.draw(this.noSkirt ? n.mesh.gridIndexCount : undefined);
-      }
+      n.mesh.draw();
+      draws++;
     }
+    this.lastDraws = draws;
+    this.lastCulled = culled;
   }
 }

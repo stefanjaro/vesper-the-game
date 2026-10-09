@@ -28,7 +28,7 @@ function lerpArr(a, b, t) {
 }
 function lerpNum(a, b, t) { return lerp(a, b, t); }
 
-export function computeEnv(dayT, time, sunBoost = 1) {
+export function computeEnv(dayT, time, sunBoost = 1, weather = null) {
   /* art-directed elevation curve: long golden hours, deep nights.
      φ: 0 dawn horizon → 0.5 noon → 1 sunset horizon → 1.5 midnight → 2 */
   const phi = ((dayT % 2) + 2) % 2;
@@ -36,6 +36,12 @@ export function computeEnv(dayT, time, sunBoost = 1) {
   const az = phi * Math.PI;
   const ce = Math.sqrt(Math.max(0, 1 - e * e));
   const sunDir = v3.norm([ce * Math.cos(az), e, ce * Math.sin(az) * 0.6]);
+
+  const dust = weather ? weather.dust : 0;
+  const rain = weather ? weather.rain : 0;
+  const storm = weather ? weather.storm : 0;
+  const windAngle = weather ? weather.windAngle : 0.7;
+  const gloom = 1 - 0.36 * dust - 0.30 * rain;
 
   /* at deep night the "light" becomes planetshine from the ringed giant.
      During day the light elevation is floored a little above the visual sun
@@ -63,22 +69,24 @@ export function computeEnv(dayT, time, sunBoost = 1) {
       gliderPos: null,          // filled by the renderer frame hook
       sunVisibility: 1,
     sunColor: lerpArr(A.sun, B.sun, t).map(x => x * sunBoost),
-    sunTint: lerpArr(A.sun, B.sun, t).map(x => x * 0.55),
-    zenith: lerpArr(A.zen, B.zen, t),
-    horizon: lerpArr(A.hor, B.hor, t),
-    ember: lerpArr(A.ember, B.ember, t),
-    fogColor: lerpArr(A.fog, B.fog, t),
-    skyAmbient: lerpArr(A.sky, B.sky, t),
-    groundAmbient: lerpArr(A.gnd, B.gnd, t),
-    cloudTint: lerpArr(A.cloud, B.cloud, t),
-    starAlpha: lerpNum(A.star, B.star, t),
-    auroraAlpha: lerpNum(A.aur, B.aur, t),
+    sunTint: lerpArr(A.sun, B.sun, t).map(x => x * 0.55).map(x => x * (1 - dust * 0.4)),
+    zenith: lerpArr(A.zen, B.zen, t).map(x => x * gloom),
+    horizon: lerpArr(A.hor, B.hor, t).map(x => x * (0.75 + 0.25 * gloom)),
+    ember: lerpArr(A.ember, B.ember, t).map(x => x * (1 - rain * 0.5) * (1 - dust * 0.45)),
+    fogColor: lerpArr(A.fog, B.fog, t)
+      .map((x, i) => lerp(lerp(x, [0.55, 0.42, 0.30][i], dust * 0.75), [0.42, 0.44, 0.48][i], rain * 0.45)),
+    skyAmbient: lerpArr(A.sky, B.sky, t).map(x => x * gloom),
+    groundAmbient: lerpArr(A.gnd, B.gnd, t).map(x => x * (0.8 + 0.2 * gloom)),
+    cloudTint: lerpArr(A.cloud, B.cloud, t).map(x => x * (1 - 0.35 * rain) * (1 - 0.3 * dust)),
+    starAlpha: lerpNum(A.star, B.star, t) * (1 - 0.85 * Math.max(dust, rain * 0.6)),
+    auroraAlpha: lerpNum(A.aur, B.aur, t) * (1 - 0.9 * Math.max(dust, rain * 0.7)),
     night: lerpNum(A.night, B.night, t),
     dusk: lerpNum(A.dusk, B.dusk, t),
-    planetGlow: 1,
-    cloudCover: 0.34 + 0.08 * Math.sin(time * 0.004),
-    windDir: [Math.cos(0.7), 0, Math.sin(0.7)],
-    fogDensity: 0.00023,
+    planetGlow: 1 - 0.8 * Math.max(dust, rain * 0.7),
+    cloudCover: clamp01(0.34 + 0.08 * Math.sin(time * 0.004) + rain * 0.55 + dust * 0.1 - 0.05),
+    windDir: [Math.cos(windAngle), 0, Math.sin(windAngle)],
+    fogDensity: 0.00023 + dust * 0.0022 + rain * 0.0011,
+    storm, rain, dust,
   };
   return env;
 }
@@ -137,6 +145,7 @@ uniform vec3 uSkyAmbient;
 uniform vec3 uGroundAmbient;
 uniform sampler2D uDepthPack;
 uniform vec2 uWind;
+uniform float uStorm;
 
 uint uhash(uvec2 q){
   uint h = q.x * 374761393u + q.y * 668265263u;
@@ -185,80 +194,80 @@ void main(){
   float waterLevel = -10.0;
   float wl = (waterLevel - uCamPos.y) / ray.y;
 
-  /* read terrain depth */
-  float dpack = texture(uDepthPack, vUv).r;
+  /* read terrain depth (packed linear) */
   float terrainDist = unpackDepth(texture(uDepthPack, vUv));
 
   bool waterHit = ray.y < -0.0005 && wl > 0.0;
-  float waterDist = 0.0;
-  vec3 water = vec3(0.0);
-  float alpha = 0.0;
-
-  if (waterHit) {
-    waterDist = wl;
-    vec3 p = uCamPos + ray * wl;
-
-    /* wave normal: directional swell + drifting detail */
-    vec2 w = normalize(uWind + vec2(1e-5, 0.0));
-    vec2 q = p.xz * 0.022;
-    float e = 0.35;
-    vec2 drift = w * uTime * 0.9;
-    float h0 = fbm(q + drift) * 0.7 + fbm(q * 3.3 - drift * 1.7) * 0.3;
-    float hx = fbm(q + drift + vec2(e, 0.0)) * 0.7 + fbm((q + vec2(e, 0.0)) * 3.3 - drift * 1.7) * 0.3;
-    float hz = fbm(q + drift + vec2(0.0, e)) * 0.7 + fbm((q + vec2(0.0, e)) * 3.3 - drift * 1.7) * 0.3;
-    /* swell gradient (long wavelengths) */
-    float sw = p.x * w.x + p.z * w.y;
-    float swell = sin(sw * 0.018 - uTime * 1.1) * 0.09;
-    float swellDx = cos(sw * 0.018 - uTime * 1.1) * 0.09 * 0.018 * w.x;
-    float swellDz = cos(sw * 0.018 - uTime * 1.1) * 0.09 * 0.018 * w.y;
-    vec3 n = normalize(vec3(-(hx - h0) * 1.3 / e - swellDx, 1.0, -(hz - h0) * 1.3 / e - swellDz));
-
-    vec3 V = -ray;
-    float fres = 0.02 + 0.98 * pow(1.0 - clamp(dot(V, n), 0.0, 1.0), 5.0);
-    vec3 refl = reflect(-V, n);
-    refl.y = abs(refl.y);
-    vec3 reflCol = skyTint(refl);
-
-    /* sun glitter */
-    vec3 H = normalize(V + uLightDir);
-    float spec = pow(clamp(dot(n, H), 0.0, 1.0), 240.0) * 1.9 + pow(clamp(dot(n, H), 0.0, 1.0), 42.0) * 0.16;
-
-    vec3 deep = vec3(0.06, 0.16, 0.17) * (uSkyAmbient * 2.2 + uGroundAmbient);
-    float thick = max(terrainDist - waterDist, 0.0);
-    vec3 body = deep * (1.0 - exp(-thick * 0.22));
-
-    float sh = 1.0;
-    vec3 col = mix(body, reflCol, fres);
-    col += uSunColor * spec * sh * (1.0 - uNight * 0.7);
-
-    /* shoreline foam */
-    float foam = smoothstep(2.2, 0.35, thick) * (0.4 + 0.6 * fbm(p.xz * 0.35 + uTime * 0.12));
-    foam *= smoothstep(0.0, 0.8, thick + 0.001);
-    col = mix(col, vec3(0.75, 0.78, 0.80) * (uNight < 0.9 ? 1.0 : 0.25), clamp(foam, 0.0, 1.0) * 0.65);
-
-    alpha = clamp(fres * 1.4 + smoothstep(0.0, 1.6, thick) * 0.75, 0.0, 1.0);
-    alpha *= smoothstep(0.02, 0.35, thick + 0.001) * 0.98 + 0.02;
-    alpha = clamp(alpha, 0.0, 1.0) * (1.0 - smoothstep(0.985, 1.0, fres)); // avoid weird full-white grazing
-
-    /* aerial fog on water */
-    float fog = 1.0 - exp(-waterDist * uFogDensity);
-    col = mix(col, uFogColor, fog);
-    water = col;
-  }
-
-  /* no water here → fully transparent */
-  if (!waterHit || alpha <= 0.002) {
+  /* never paint water where no opaque geometry exists: that is sky or a
+     chunk that is still streaming in, not a lake */
+  if (!waterHit || terrainDist > uFar * 0.985) {
     fragColor = vec4(0.0, 0.0, 0.0, 0.0);
     return;
   }
-  /* occluded by nearer terrain? soft blend at the shoreline */
+
+  float waterDist = wl;
+  vec3 p = uCamPos + ray * wl;
+
+  /* LOD: flatten waves with distance so they stop aliasing into static */
+  float detail = exp(-waterDist * 0.0024);
+  vec2 w = normalize(uWind + vec2(1e-5, 0.0));
+  vec2 q = p.xz * 0.045;
+  float e = 0.5;
+  vec2 drift = w * uTime * 1.25;
+  float chop = 1.0 + uStorm * 1.7;
+  float h0 = fbm(q + drift) * 0.7 + fbm(q * 2.6 - drift * 1.9) * 0.3;
+  float hx = fbm(q + drift + vec2(e, 0.0)) * 0.7 + fbm((q + vec2(e, 0.0)) * 2.6 - drift * 1.9) * 0.3;
+  float hz = fbm(q + drift + vec2(0.0, e)) * 0.7 + fbm((q + vec2(0.0, e)) * 2.6 - drift * 1.9) * 0.3;
+  /* long swell */
+  float sw = p.x * w.x + p.z * w.y;
+  float swellAmp = 0.05 + 0.06 * uStorm;
+  float swellPh = sw * 0.012 - uTime * 1.1;
+  float swellDx = cos(swellPh) * swellAmp * 0.012 * w.x;
+  float swellDz = cos(swellPh) * swellAmp * 0.012 * w.y;
+  vec3 nFlat = normalize(vec3(-swellDx, 1.0, -swellDz));
+  vec3 nWave = normalize(vec3(-(hx - h0) * 1.15 / e * chop - swellDx, 1.0, -(hz - h0) * 1.15 / e * chop - swellDz));
+  vec3 n = normalize(mix(nFlat, nWave, clamp(detail, 0.0, 1.0)));
+
+  vec3 V = -ray;
+  float fres = 0.02 + 0.98 * pow(1.0 - clamp(dot(V, n), 0.0, 1.0), 5.0);
+  vec3 refl = reflect(-V, n);
+  refl.y = abs(refl.y);
+  vec3 reflCol = skyTint(refl);
+
+  /* sun glitter, faded with distance to kill fireflies */
+  vec3 H = normalize(V + uLightDir);
+  float ndh = clamp(dot(n, H), 0.0, 1.0);
+  float spec = (pow(ndh, 240.0) * 1.35 + pow(ndh, 42.0) * 0.10) * detail * detail;
+
+  vec3 deep = vec3(0.05, 0.13, 0.16) * (uSkyAmbient * 2.2 + uGroundAmbient);
+  float thick = max(terrainDist - waterDist, 0.0);
+  vec3 body = deep * (1.0 - exp(-thick * 0.28));
+
+  vec3 col = mix(body, reflCol, fres);
+  col += uSunColor * spec * (1.0 - uNight * 0.75);
+
+  /* broken shoreline foam, gone by ~1.5 m depth, faded with distance */
+  float shore = smoothstep(1.6, 0.0, thick);
+  float foamN = fbm(p.xz * 0.55 + vec2(uTime * 0.13, uTime * 0.09)) * 0.6
+              + fbm(p.xz * 1.9 - vec2(uTime * 0.21, uTime * 0.15)) * 0.4;
+  float foam = shore * smoothstep(0.52, 0.80, foamN) * (0.55 + 0.45 * uStorm)
+             * clamp(detail + 0.3, 0.0, 1.0);
+  col = mix(col, vec3(0.82, 0.84, 0.84) * (1.0 - uNight * 0.55), clamp(foam, 0.0, 1.0) * 0.5);
+
+  float alpha = clamp(fres * 1.4 + smoothstep(0.0, 1.6, thick) * 0.75, 0.0, 1.0);
+  alpha *= smoothstep(0.02, 0.35, thick + 0.001) * 0.98 + 0.02;
+  alpha = clamp(alpha, 0.0, 1.0) * (1.0 - smoothstep(0.985, 1.0, fres));
+
+  float fog = 1.0 - exp(-waterDist * uFogDensity);
+  col = mix(col, uFogColor, fog);
+
   float occl = smoothstep(-1.4, 1.8, terrainDist - waterDist);
   alpha *= occl;
   if (alpha <= 0.004) {
     fragColor = vec4(0.0, 0.0, 0.0, 0.0);
     return;
   }
-  fragColor = vec4(water, alpha);
+  fragColor = vec4(col, alpha);
 }`;
 
 const WATER_VS = QUAD_VS;
@@ -340,6 +349,7 @@ uniform float uAberration;
 uniform float uFlash;       // white flash 0..1 for beacon ignition
 uniform vec2 uRes;
 uniform float uWarm;        // grade warmth (dusk boost)
+uniform float uFilter;      // photo filter: 0 natural 1 amber 2 nocturne 3 bleach 4 ember
 
 vec3 aces(vec3 x){
   const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
@@ -369,6 +379,23 @@ void main(){
   float lum = dot(c, vec3(0.299, 0.587, 0.114));
   c = mix(c, c * vec3(1.07, 0.99, 0.90), uWarm * clamp(lum, 0.0, 1.0) * 0.7);
   c += vec3(-0.008, 0.004, 0.014) * (1.0 - clamp(lum, 0.0, 1.0));
+
+  /* photo filters */
+  if (uFilter > 0.5) {
+    if (uFilter < 1.5) {            /* amber */
+      c *= vec3(1.14, 1.0, 0.78);
+      c = mix(vec3(dot(c, vec3(0.299, 0.587, 0.114))), c, 1.12);
+    } else if (uFilter < 2.5) {     /* nocturne */
+      c *= vec3(0.80, 0.94, 1.22);
+      c = mix(vec3(dot(c, vec3(0.299, 0.587, 0.114))), c, 0.92);
+    } else if (uFilter < 3.5) {     /* sunbleach */
+      c = mix(c, vec3(0.78, 0.76, 0.72), 0.16);
+      c = c / (c + 0.55) * 1.75;
+    } else {                        /* ember */
+      c *= vec3(1.18, 0.94, 0.80);
+      c = (c - 0.5) * 1.18 + 0.5;
+    }
+  }
 
   c = aces(c * 0.80);
 
@@ -423,19 +450,20 @@ export class Renderer {
   ensureTargets(w, h) {
     const gl = this.gl;
     const fmt = { internalFormat: this.sceneFormat, depth: true };
+    const hw = Math.max(2, w >> 1), hh = Math.max(2, h >> 1);
     this.rts.scene = resizeRenderTarget(gl, this.rts.scene, w, h, fmt);
     this.rts.depthPack = resizeRenderTarget(gl, this.rts.depthPack, w, h, { internalFormat: gl.RGBA8 });
-    this.rts.ray = resizeRenderTarget(gl, this.rts.ray, w >> 1, h >> 1, { internalFormat: this.sceneFormat });
-    this.rts.rayB = resizeRenderTarget(gl, this.rts.rayB, w >> 1, h >> 1, { internalFormat: this.sceneFormat });
+    this.rts.ray = resizeRenderTarget(gl, this.rts.ray, hw, hh, { internalFormat: this.sceneFormat });
+    this.rts.rayB = resizeRenderTarget(gl, this.rts.rayB, hw, hh, { internalFormat: this.sceneFormat });
     while (this.bloomRTs.length < this.bloomLevels) {
       this.bloomRTs.push({ a: null, b: null, w: 0, h: 0 });
     }
-    let bw = w >> 1, bh = h >> 1;
+    let bw = hw, bh = hh;
     for (let i = 0; i < this.bloomLevels; i++) {
       this.bloomRTs[i].a = resizeRenderTarget(gl, this.bloomRTs[i].a, bw, bh, { internalFormat: this.sceneFormat });
       this.bloomRTs[i].b = resizeRenderTarget(gl, this.bloomRTs[i].b, bw, bh, { internalFormat: this.sceneFormat });
       this.bloomRTs[i].w = bw; this.bloomRTs[i].h = bh;
-      bw >>= 1; bh >>= 1;
+      bw = Math.max(2, bw >> 1); bh = Math.max(2, bh >> 1);
     }
   }
 
@@ -476,7 +504,9 @@ export class Renderer {
     env.fogDensity = game.worldFogDensity;
     /* the manta's drop-shadow needs its position + sun factor */
     env.gliderPos = game.ship ? game.ship.pos : cam.pos;
-    env.sunVisibility = clamp01(env.lightDir[1] * 7.0);
+    env.sunVisibility = clamp01(env.lightDir[1] * 7.0) * (1 - (game.eclipseDark || 0) * 0.9);
+    env.shadowExtent = game.shadowExtent;
+    env.storm = game.weather ? game.weather.storm : 0;
 
     /* ── shadow pass ── */
     this.terrain.computeLightMatrix(env.lightDir, cam.pos, game.shadowExtent);
@@ -559,6 +589,7 @@ export class Renderer {
     gl.uniformMatrix4fv(this.wu.uInvViewProj, false, m4inverse(viewProj));
     gl.uniformMatrix4fv(this.wu.uViewProj, false, viewProj);
     gl.uniform2f(this.wu.uWind, env.windDir[0], env.windDir[2]);
+    gl.uniform1f(this.wu.uStorm, env.storm || 0);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.rts.depthPack.tex);
     gl.uniform1i(this.wu.uDepthPack, 0);
@@ -572,11 +603,6 @@ export class Renderer {
     /* ── post chain ── */
     if (game.raw) { this.rawView(); return; }
     if (game.debugShadow) { this.debugShadowView(game); return; }
-    if (game.raw) { this.blit(this.copyProg(), this.copyU(), null, () => {
-      this.gl.uniform1i(this.copyU().uTex, 0);
-      this.gl.activeTexture(this.gl.TEXTURE0);
-      this.gl.bindTexture(this.gl.TEXTURE_2D, this.rts.scene.tex);
-    }); return; }
     this.postProcess(env, game, view, proj, viewProj, w, h);
   }
 
@@ -715,6 +741,7 @@ void main(){
       gl.uniform1f(this.cu.uFlash, game.flash);
       gl.uniform2f(this.cu.uRes, w, h);
       gl.uniform1f(this.cu.uWarm, 0.35 + 0.65 * env.dusk);
+      gl.uniform1f(this.cu.uFilter, game.photoFilter || 0);
     });
   }
 

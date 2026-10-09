@@ -38,6 +38,7 @@ uniform float uPlanetGlow;
 uniform vec3 uCloudTint;
 uniform float uCloudCover;
 uniform vec2 uWind;
+uniform float uEclipse;
 
 const float PI = 3.14159265;
 
@@ -255,7 +256,7 @@ void main(){
   /* mie glow around the sun */
   float sdot = clamp(dot(ray, uSunDir), -1.0, 1.0);
   float glow = pow(max(sdot, 0.0), 14.0) * 0.55 + pow(max(sdot, 0.0), 90.0) * 0.9;
-  col += uSunTint * glow * (1.0 - uNight * 0.55);
+  col += uSunTint * glow * (1.0 - uNight * 0.55) * (1.0 - uEclipse * 0.9);
 
   /* stars + planet behind atmosphere haze near horizon */
   float planetCov = 0.0;
@@ -272,7 +273,17 @@ void main(){
   /* sun disc on top (dimmed by cloud) */
   float sunDisc = smoothstep(0.9993, 0.99975, sdot);
   vec3 sunCol = uSunTint * 2.4 + vec3(1.0, 0.9, 0.8);
-  col += sunCol * sunDisc * (1.0 - cl.a * 0.85) * (1.0 - uNight * 0.9);
+  col += sunCol * sunDisc * (1.0 - cl.a * 0.85) * (1.0 - uNight * 0.9) * (1.0 - uEclipse);
+
+  /* eclipse: a dark disc swallows the sun with a thin ring of fire */
+  if (uEclipse > 0.002) {
+    float rAng = acos(clamp(sdot, -1.0, 1.0));
+    float shadowR = 0.012 + uEclipse * 0.055;
+    float disc = 1.0 - smoothstep(shadowR - 0.004, shadowR + 0.004, rAng);
+    col = mix(col, vec3(0.006, 0.008, 0.016), disc * clamp(uEclipse * 1.5, 0.0, 1.0));
+    float rim = exp(-pow(abs(rAng - shadowR) * 200.0, 2.0));
+    col += vec3(1.4, 0.82, 0.42) * rim * uEclipse * 1.2;
+  }
 
   /* aurora over everything */
   col += aurora(ray);
@@ -315,6 +326,7 @@ export class Sky {
     gl.uniform3fv(this.u.uCloudTint, env.cloudTint);
     gl.uniform1f(this.u.uCloudCover, env.cloudCover);
     gl.uniform2f(this.u.uWind, env.windDir[0], env.windDir[2]);
+    gl.uniform1f(this.u.uEclipse, env.eclipse || 0);
     this.mesh.draw();
   }
 }
