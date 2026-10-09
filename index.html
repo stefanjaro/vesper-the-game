@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>VESPER — an endless flight</title>
+<meta name="description" content="Glide across an endless procedural desert beneath a ringed giant. Terrain, sky, water, music — every pixel and every note is generated live in your browser. No assets. No libraries.">
+<link rel="icon" href="data:,">
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: #06070c; }
+  body {
+    font-family: Georgia, 'Times New Roman', serif;
+    color: #e8dcc8;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+  }
+  #gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+  .veil {
+    position: fixed; inset: 0; z-index: 10;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; pointer-events: none;
+    background: radial-gradient(120% 90% at 50% 42%, rgba(6,7,12,0) 40%, rgba(6,7,12,0.55) 100%);
+    transition: opacity 1.6s ease;
+  }
+  .veil.gone { opacity: 0; }
+  .title {
+    font-size: clamp(3.4rem, 9vw, 6.5rem);
+    font-weight: 400; font-style: normal;
+    letter-spacing: 0.42em; text-indent: 0.42em;
+    color: #f2e8d5;
+    text-shadow: 0 0 34px rgba(255, 190, 120, 0.35), 0 2px 30px rgba(0,0,0,0.6);
+    animation: breathe 7s ease-in-out infinite;
+  }
+  @keyframes breathe { 0%,100% { opacity: 0.92 } 50% { opacity: 1 } }
+  .subtitle {
+    margin-top: 1.4rem;
+    font-style: italic; font-size: clamp(0.95rem, 2vw, 1.15rem);
+    letter-spacing: 0.16em; color: #b7a98d;
+  }
+  .hint {
+    position: fixed; bottom: 5.5vh; left: 0; right: 0; z-index: 11;
+    text-align: center; font-size: 0.8rem; letter-spacing: 0.34em; text-indent: 0.34em;
+    color: rgba(222, 205, 172, 0.75);
+    animation: pulse 3.2s ease-in-out infinite;
+    transition: opacity 1s ease;
+  }
+  .hint.gone { opacity: 0; animation: none; visibility: hidden; transition: opacity 1s ease, visibility 0s 1s; }
+  @keyframes pulse { 0%,100% { opacity: 0.45 } 50% { opacity: 0.95 } }
+  .colophon {
+    position: fixed; bottom: 2.2vh; left: 0; right: 0; z-index: 11;
+    text-align: center; font-size: 0.66rem; letter-spacing: 0.14em;
+    color: rgba(222, 205, 172, 0.38); font-style: italic;
+    transition: opacity 1s ease;
+  }
+  .colophon.gone { opacity: 0; }
+
+  /* HUD */
+  #hud { position: fixed; inset: 0; z-index: 5; pointer-events: none; opacity: 0; transition: opacity 1.2s ease; }
+  #hud.on { opacity: 1; }
+  .dial {
+    position: absolute; font-size: 0.68rem; letter-spacing: 0.28em; text-indent: 0.28em;
+    color: rgba(238, 224, 196, 0.82);
+    text-shadow: 0 1px 12px rgba(0,0,0,0.8);
+  }
+  #speed { left: 4vw; bottom: 9vh; }
+  #alt { left: 4vw; bottom: 12.2vh; }
+  #shards { right: 4vw; top: 8vh; text-align: right; }
+  #shards .n { font-size: 1.6rem; letter-spacing: 0.1em; text-indent: 0; display: block; color: #f5e6c4; text-shadow: 0 0 18px rgba(255,214,140,.5); }
+  #beacons { right: 4vw; top: 13.6vh; text-align: right; font-size: 0.68rem; letter-spacing: 0.28em; color: rgba(238,224,196,.7); }
+  #compass {
+    position: absolute; left: 50%; top: 7vh; transform: translateX(-50%);
+    width: 260px; height: 34px; overflow: hidden; opacity: 0.85;
+  }
+  #compass .marker {
+    position: absolute; top: 0; left: 50%; width: 2px; height: 12px;
+    background: #f5e0b0; box-shadow: 0 0 8px rgba(255, 220, 150, 0.8);
+    transform-origin: 50% 0;
+  }
+  #compass .label {
+    position: absolute; top: 14px; left: 0; right: 0; text-align: center;
+    font-size: 0.6rem; letter-spacing: 0.3em; color: rgba(238,224,196,0.6);
+  }
+  #center-dot {
+    position: absolute; left: 50%; top: 50%; width: 3px; height: 3px; margin: -1.5px;
+    border-radius: 50%; background: rgba(255,255,255,0.5);
+    box-shadow: 0 0 6px rgba(255,255,255,0.4);
+  }
+
+  .overlay {
+    position: fixed; inset: 0; z-index: 20;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: rgba(4,5,9,0.55); backdrop-filter: blur(6px);
+    opacity: 0; pointer-events: none; transition: opacity 0.7s ease;
+    text-align: center; padding: 2rem;
+  }
+  .overlay.on { opacity: 1; pointer-events: auto; }
+  .overlay h2 { font-weight: 400; font-size: 1.9rem; letter-spacing: 0.3em; text-indent: 0.3em; color: #f2e8d5; }
+  .overlay p { margin-top: 1rem; font-size: 0.9rem; letter-spacing: 0.1em; color: #b7a98d; font-style: italic; }
+
+  #finale {
+    position: fixed; inset: 0; z-index: 15; pointer-events: none;
+    display: flex; align-items: center; justify-content: center; flex-direction: column;
+    opacity: 0; transition: opacity 3s ease; text-align: center;
+  }
+  #finale.on { opacity: 1; }
+  #finale .big {
+    font-size: clamp(1.8rem, 5vw, 3.4rem); letter-spacing: 0.34em; text-indent: 0.34em;
+    color: #fff3dd; text-shadow: 0 0 60px rgba(255, 200, 120, 0.8);
+  }
+  #finale .small { margin-top: 1.6rem; font-style: italic; letter-spacing: 0.2em; color: #d8c8a8; }
+
+  #err {
+    position: fixed; inset: auto 0 0 0; z-index: 99; padding: 0.6rem 1rem;
+    background: rgba(60,10,10,0.92); color: #ffd7d7; font: 12px monospace;
+    white-space: pre-wrap; display: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div class="veil" id="veil">
+  <div class="title">VESPER</div>
+  <div class="subtitle">an endless flight over a world with no name</div>
+</div>
+<div class="hint" id="hint">CLICK TO BEGIN</div>
+<div class="colophon" id="colophon">
+  every dune, cloud, star and note — generated live in your browser · no assets · no libraries
+</div>
+<div class="hint" id="tips" style="animation:none;opacity:0;transition:opacity 2s ease;pointer-events:none">
+  steer with the mouse · shift burns light · spiralling dust lifts you · the compass points to a beacon
+</div>
+
+<div id="hud">
+  <div class="dial" id="alt">ALTITUDE 000 M</div>
+  <div class="dial" id="speed">AIRSPEED 00 M/S</div>
+  <div id="shards"><span class="n">0</span>LIGHT</div>
+  <div id="beacons">BEACONS AWAKENED 0 / 5</div>
+  <div id="compass"><div class="marker"></div><div class="label"></div></div>
+  <div id="center-dot"></div>
+</div>
+
+<div class="overlay" id="pause"><h2>DRIFTING</h2><p>press P or click to continue</p></div>
+<div id="finale"><div class="big">THE WORLD REMEMBERS THE LIGHT</div><div class="small">fly on, as long as you like</div></div>
+<pre id="err"></pre>
+<pre id="dbg" style="position:fixed;top:8px;left:8px;z-index:30;font:11px ui-monospace,monospace;color:#9fe8c8;background:rgba(4,8,6,.6);padding:4px 8px;border-radius:4px;display:none;pointer-events:none;"></pre>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

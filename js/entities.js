@@ -1,0 +1,964 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   VESPER · entities.js
+   Everything that lives and moves: the sky-manta you fly, its wingtip
+   trails, flocks of gliders, light shards, ancient beacons, crystals,
+   thermals and particles.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+import {
+  v3, clamp, clamp01, lerp, smoothstep,
+  createProgram, uniforms, Mesh, mulberry32,
+} from './engine.js';
+import { terrainHeight, WORLD } from './world.js';
+
+/* ── shared GLSL chunks ───────────────────────────────────────────────────── */
+
+const LIGHT_CHUNK = /* glsl */`
+uniform vec3 uLightDir;
+uniform vec3 uSunColor;
+uniform vec3 uSkyAmbient;
+uniform vec3 uGroundAmbient;
+uniform vec3 uFogColor;
+uniform float uFogDensity;
+uniform vec3 uCamPos;
+uniform float uNight;
+vec3 applyLight(vec3 albedo, vec3 n, vec3 p){
+  float ndl = clamp(dot(n, uLightDir), 0.0, 1.0);
+  vec3 amb = mix(uGroundAmbient, uSkyAmbient, clamp(n.y * 0.5 + 0.5, 0.0, 1.0)) * 1.35;
+  vec3 lit = albedo * (uSunColor * ndl + amb);
+  float fog = 1.0 - exp(-length(p - uCamPos) * uFogDensity);
+  return mix(lit, uFogColor, fog);
+}`;
+
+/* instancing helper: shares a geometry VAO and adds an instance buffer */
+function attachInstances(gl, mesh, buffer, slots, divisor = 1) {
+  gl.bindVertexArray(mesh.vao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  let offset = 0;
+  for (const s of slots) {
+    gl.enableVertexAttribArray(s.loc);
+    gl.vertexAttribPointer(s.loc, s.size, gl.FLOAT, false, s.stride, offset);
+    gl.vertexAttribDivisor(s.loc, divisor);
+    offset += s.size * 4;
+  }
+  gl.bindVertexArray(null);
+}
+
+/* ── the sky-manta: sleek low-poly glider with clean analytic normals ─────── */
+
+function buildManta() {
+  /* vertices: nose, wingtips, tail corners, keel, spine */
+  const V = [
+    [0, 0.00, -2.3],      // 0 nose
+    [-2.6, 0.42, 1.0],    // 1 left wingtip
+    [2.6, 0.42, 1.0],     // 2 right wingtip
+    [0, 0.18, 1.9],       // 3 tail top
+    [-0.62, -0.12, 1.75], // 4 left tail
+    [0.62, -0.12, 1.75],  // 5 right tail
+    [0, -0.42, 0.55],     // 6 keel bottom
+    [-0.8, 0.10, -0.9],   // 7 left shoulder
+    [0.8, 0.10, -0.9],    // 8 right shoulder
+  ];
+  const F = [
+    // top surface
+    [0, 7, 1], [0, 2, 8], [7, 3, 1], [8, 2, 3], [7, 8, 3],
+    // underside
+    [0, 1, 6], [0, 6, 2], [1, 4, 6], [2, 6, 5], [4, 5, 6], [1, 3, 4], [2, 5, 3],
+  ];
+  const verts = [];
+  for (const [a, b, c] of F) {
+    const p1 = V[a], p2 = V[b], p3 = V[c];
+    const n = v3.cross(v3.sub(p2, p1), v3.sub(p3, p1));
+    const l = v3.len(n) || 1;
+    const nn = [n[0] / l, n[1] / l, n[2] / l];
+    for (const i of [a, b, c]) verts.push(...V[i], ...nn);
+  }
+  const idx = new Uint32Array(verts.length / 6);
+  for (let i = 0; i < idx.length; i++) idx[i] = i;
+  return { verts: new Float32Array(verts), idx };
+}
+
+/* ── glider shader ────────────────────────────────────────────────────────── */
+
+/* wingtip deforms onto the flat delta: bend wingtip points, keep body rigid */
+const GLIDER_VS = /* glsl */`#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNormal;
+uniform mat4 uViewProj;
+uniform mat4 uModel;
+uniform float uTime;
+uniform float uFlap;
+out vec3 vWorld;
+out vec3 vNormal;
+void main(){
+  vec3 p = aPos;
+  float spanF = clamp(abs(p.x) / 2.6, 0.0, 1.0);
+  float bend = sin(uTime * 2.6 - spanF * 1.2) * spanF * spanF * 0.65 * uFlap;
+  p.y += bend;
+  vec4 w = uModel * vec4(p, 1.0);
+  vWorld = w.xyz;
+  vec3 n = aNormal;
+  n.y += spanF * cos(uTime * 2.6 - spanF * 1.2) * 0.55 * uFlap;
+  vNormal = n;
+  gl_Position = uViewProj * w;
+}`;
+
+const GLIDER_FS = /* glsl */`#version 300 es
+precision highp float;
+in vec3 vWorld;
+in vec3 vNormal;
+uniform vec3 uGlowColor;
+uniform float uGlowAmt;
+out vec4 fragColor;
+${LIGHT_CHUNK}
+void main(){
+  vec3 n = normalize(vNormal);
+  vec3 V = normalize(uCamPos - vWorld);
+  vec3 albedoTop = vec3(0.20, 0.18, 0.25);
+  vec3 albedoBel = vec3(0.58, 0.50, 0.40);
+  float bel = clamp(-n.y, 0.0, 1.0);
+  vec3 albedo = mix(albedoTop, albedoBel, bel * 0.85);
+  float rim = pow(1.0 - clamp(dot(n, V), 0.0, 1.0), 2.5);
+  vec3 lit = applyLight(albedo, n, vWorld);
+  lit += uSunColor * rim * 0.35;
+  lit += uGlowColor * uGlowAmt;
+  fragColor = vec4(lit, 1.0);
+}`;
+
+/* ── trails (dynamic ribbons, billboarded around their own axis) ──────────── */
+
+const TRAIL_VS = /* glsl */`#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec2 aInfo;
+uniform mat4 uViewProj;
+uniform vec3 uCamPos;
+uniform float uWidth;
+out vec2 vInfo;
+void main(){
+  vInfo = aInfo;
+  /* widen perpendicular to view, horizontal-ish */
+  vec3 dir = aPos - uCamPos;
+  vec3 side = normalize(cross(dir, vec3(0.0, 1.0, 0.0)) + vec3(1e-4));
+  float sideF = aInfo.y;
+  float w = uWidth * (1.0 - aInfo.x * 0.85);
+  gl_Position = uViewProj * vec4(aPos + side * sideF * w, 1.0);
+}`;
+
+const TRAIL_FS = /* glsl */`#version 300 es
+precision highp float;
+in vec2 vInfo;
+uniform vec3 uColor;
+uniform float uFade;
+out vec4 fragColor;
+void main(){
+  float a = 1.0 - vInfo.x;
+  a *= a;
+  float edge = 1.0 - abs(vInfo.y);
+  vec3 c = uColor * (0.5 + a * 1.6) * (0.35 + 0.65 * edge);
+  fragColor = vec4(c * a * uFade, 1.0);
+}`;
+
+/* ── birds (instanced) ────────────────────────────────────────────────────── */
+
+const BIRD_VS = /* glsl */`#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec4 aInst;
+layout(location=2) in vec4 bInst;
+uniform mat4 uViewProj;
+uniform float uTime;
+out vec3 vWorld;
+out vec3 vNormal;
+out float vGlint;
+void main(){
+  vec3 p = aPos;
+  float flap = sin(uTime * 7.0 + bInst.x * 6.28);
+  float spanF = clamp(abs(p.x), 0.0, 1.0);
+  p.y += flap * spanF * 0.85;
+  vGlint = clamp(flap * spanF, 0.0, 1.0);
+  float ca = cos(aInst.w), sa = sin(aInst.w);
+  p = vec3(p.x * ca - p.z * sa, p.y, p.x * sa + p.z * ca);
+  vec3 world = aInst.xyz + p * bInst.y;
+  vWorld = world;
+  vNormal = normalize(vec3(flap * 0.4, 1.0, 0.25));
+  gl_Position = uViewProj * vec4(world, 1.0);
+}`;
+
+const BIRD_FS = /* glsl */`#version 300 es
+precision highp float;
+in vec3 vWorld;
+in vec3 vNormal;
+in float vGlint;
+${LIGHT_CHUNK}
+out vec4 fragColor;
+void main(){
+  vec3 albedo = vec3(0.17, 0.15, 0.19);
+  vec3 lit = applyLight(albedo, normalize(vNormal), vWorld);
+  lit += uSunColor * vGlint * 0.30;
+  fragColor = vec4(lit, 1.0);
+}`;
+
+/* ── beacons ──────────────────────────────────────────────────────────────── */
+
+function buildBeacon() {
+  const verts = [], idx = [];
+  const rings = [
+    { y: 0, r: 3.4 }, { y: 5, r: 2.6 }, { y: 12, r: 2.0 }, { y: 19, r: 1.7 }, { y: 24, r: 2.4 }, { y: 27, r: 1.2 },
+  ];
+  const SEG = 6;
+  const ringStart = [];
+  for (const ring of rings) {
+    ringStart.push(verts.length / 6);
+    for (let s = 0; s < SEG; s++) {
+      const a = (s / SEG) * Math.PI * 2 + 0.26;
+      const r = ring.r * (0.92 + 0.16 * Math.sin(s * 12.9898 + ring.y * 3.7));
+      verts.push(Math.cos(a) * r, ring.y, Math.sin(a) * r, 0, 1, 0);
+    }
+  }
+  for (let ri = 0; ri < rings.length - 1; ri++) {
+    for (let s = 0; s < SEG; s++) {
+      const s2 = (s + 1) % SEG;
+      const a = ringStart[ri] + s, b = ringStart[ri] + s2;
+      const c = ringStart[ri + 1] + s, d = ringStart[ri + 1] + s2;
+      idx.push(a, b, d, a, d, c);
+    }
+  }
+  const top = verts.length / 6;
+  verts.push(0, rings[rings.length - 1].y + 1.4, 0, 0, 1, 0);
+  for (let s = 0; s < SEG; s++) {
+    idx.push(ringStart[ringStart.length - 1] + s, ringStart[ringStart.length - 1] + (s + 1) % SEG, top);
+  }
+  return { verts: new Float32Array(verts), idx: new Uint32Array(idx) };
+}
+
+const BEACON_VS = /* glsl */`#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNormal;
+uniform mat4 uViewProj;
+uniform mat4 uModel;
+out vec3 vWorld;
+out vec3 vLocal;
+void main(){
+  vec4 w = uModel * vec4(aPos, 1.0);
+  vWorld = w.xyz;
+  vLocal = aPos;
+  gl_Position = uViewProj * w;
+}`;
+
+const BEACON_FS = /* glsl */`#version 300 es
+precision highp float;
+in vec3 vWorld;
+in vec3 vLocal;
+uniform float uLit;
+uniform float uTime;
+${LIGHT_CHUNK}
+out vec4 fragColor;
+void main(){
+  vec3 n = normalize(vec3(vLocal.x, 0.0, vLocal.z));
+  vec3 stone = vec3(0.30, 0.27, 0.26) * (0.85 + 0.3 * sin(vLocal.y * 2.7));
+  float ch = smoothstep(0.55, 0.75, sin(vLocal.y * 1.9 + 1.3) * 0.5 + 0.5);
+  vec3 ember = vec3(1.5, 0.85, 0.35);
+  float pulse = 0.75 + 0.25 * sin(uTime * 2.2);
+  vec3 lit = applyLight(stone, n, vWorld);
+  lit += ember * ch * uLit * pulse * 1.7;
+  lit += ember * uLit * 0.20;
+  fragColor = vec4(lit, 1.0);
+}`;
+
+/* ── crystals (instanced spikes) ──────────────────────────────────────────── */
+
+function buildCrystal() {
+  const verts = [], idx = [];
+  const SEG = 5;
+  const H = 1.0, R = 0.22;
+  const tip = 0;
+  for (let s = 0; s < SEG; s++) {
+    const a = (s / SEG) * Math.PI * 2;
+    verts.push(Math.cos(a) * R, 0, Math.sin(a) * R, 0, 1, 0);
+  }
+  verts.push(0, H, 0, 0, 1, 0);
+  verts.push(0, -0.2, 0, 0, 1, 0);
+  const tipI = SEG, baseI = SEG + 1;
+  for (let s = 0; s < SEG; s++) {
+    const s2 = (s + 1) % SEG;
+    idx.push(tipI, s, s2);
+    idx.push(baseI, s2, s);
+  }
+  return { verts: new Float32Array(verts), idx: new Uint32Array(idx) };
+}
+
+const CRYSTAL_VS = /* glsl */`#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec4 aInst;
+layout(location=2) in vec4 bInst;
+uniform mat4 uViewProj;
+out vec3 vWorld;
+out vec3 vLocal;
+out float vGlow;
+void main(){
+  float c = cos(bInst.x), s = sin(bInst.x);
+  vec3 p = vec3(aPos.x * c - aPos.z * s, aPos.y, aPos.x * s + aPos.z * c) * aInst.w;
+  vec3 world = aInst.xyz + p;
+  vWorld = world;
+  vLocal = aPos * aInst.w;
+  vGlow = bInst.y;
+  gl_Position = uViewProj * vec4(world, 1.0);
+}`;
+
+const CRYSTAL_FS = /* glsl */`#version 300 es
+precision highp float;
+in vec3 vWorld;
+in vec3 vLocal;
+in float vGlow;
+${LIGHT_CHUNK}
+out vec4 fragColor;
+void main(){
+  vec3 n = normalize(vec3(vLocal.x, max(vLocal.y, 0.3) * 0.6, vLocal.z));
+  vec3 stone = vec3(0.22, 0.28, 0.33);
+  float fres = pow(1.0 - clamp(n.y, 0.0, 1.0), 1.5);
+  vec3 lit = applyLight(stone, n, vWorld);
+  lit += vec3(0.22, 0.85, 0.70) * (vGlow * (0.4 + fres * 1.6));
+  fragColor = vec4(lit, 1.0);
+}`;
+
+/* ── additive billboards (shards) ─────────────────────────────────────────── */
+
+const BILLBOARD_VS = /* glsl */`#version 300 es
+precision highp float;
+layout(location=0) in vec2 aCorner;
+layout(location=1) in vec4 aInst;
+layout(location=2) in vec4 bInst;
+uniform mat4 uViewProj;
+uniform vec3 uCamRight;
+uniform vec3 uCamUp;
+uniform float uTime;
+out vec2 vCorner;
+out float vTw;
+void main(){
+  vCorner = aCorner;
+  float bob = sin(uTime * 1.3 + bInst.x * 6.28) * aInst.w * 0.14;
+  vec3 world = aInst.xyz + vec3(0.0, bob, 0.0);
+  vTw = 0.8 + 0.2 * sin(uTime * 5.0 + bInst.x * 40.0) * bInst.y;
+  vec3 p = world + uCamRight * aCorner.x * aInst.w + uCamUp * aCorner.y * aInst.w;
+  gl_Position = uViewProj * vec4(p, 1.0);
+}`;
+
+const BILLBOARD_FS = /* glsl */`#version 300 es
+precision highp float;
+in vec2 vCorner;
+in float vTw;
+uniform vec3 uColor;
+out vec4 fragColor;
+void main(){
+  float r = length(vCorner);
+  float core = smoothstep(0.26, 0.0, r);
+  float halo = exp(-r * 2.8) * 0.5;
+  vec3 c = uColor * (core * 2.8 + halo) * vTw;
+  float sp = max(0.0, 1.0 - (abs(vCorner.x) + abs(vCorner.y)) * 0.7);
+  c += uColor * pow(sp, 7.0) * 1.5 * vTw;
+  fragColor = vec4(c, 1.0);
+}`;
+
+/* ── particles (points) ───────────────────────────────────────────────────── */
+
+const PARTICLE_VS = /* glsl */`#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec4 aData;
+uniform mat4 uViewProj;
+uniform vec3 uCamPos;
+out vec4 vData;
+void main(){
+  vData = aData;
+  vec4 clip = uViewProj * vec4(aPos, 1.0);
+  gl_Position = clip;
+  float dist = max(length(aPos - uCamPos), 1.0);
+  gl_PointSize = clamp(aData.x * 640.0 / dist, 1.0, 40.0);
+}`;
+
+const PARTICLE_FS = /* glsl */`#version 300 es
+precision highp float;
+in vec4 vData;
+out vec4 fragColor;
+void main(){
+  vec2 uv = gl_PointCoord * 2.0 - 1.0;
+  float r = length(uv);
+  float a = exp(-r * r * 3.0) * vData.y;
+  if (a < 0.004) discard;
+  vec3 warm = vec3(1.0, 0.82, 0.55);
+  vec3 cool = vec3(0.55, 0.95, 0.85);
+  vec3 c = mix(warm, cool, clamp(vData.z, 0.0, 1.0));
+  fragColor = vec4(c * a, 1.0);
+}`;
+
+/* ── light pillar ─────────────────────────────────────────────────────────── */
+
+const PILLAR_VS = /* glsl */`#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec4 aInst;
+uniform mat4 uViewProj;
+out vec3 vWorld;
+out float vY;
+void main(){
+  vec3 world = aInst.xyz + vec3(aPos.x * aInst.w, aPos.y * 1100.0, aPos.z * aInst.w);
+  vWorld = world;
+  vY = aPos.y;
+  gl_Position = uViewProj * vec4(world, 1.0);
+}`;
+
+const PILLAR_FS = /* glsl */`#version 300 es
+precision highp float;
+in vec3 vWorld;
+in float vY;
+uniform vec3 uCamPos;
+uniform float uTime;
+out vec4 fragColor;
+void main(){
+  float fadeTop = smoothstep(1.0, 0.2, vY);
+  float fadeBot = smoothstep(0.0, 0.02, vY);
+  vec3 c = vec3(1.25, 0.82, 0.42) * (0.55 + 0.3 * sin(vY * 26.0 - uTime * 2.6));
+  fragColor = vec4(c * fadeTop * fadeBot * 1.5, 1.0);
+}`;
+
+/* ── placement ────────────────────────────────────────────────────────────── */
+
+const TRAIL_SEGS = 44;
+const BIRDS_MAX = 140;
+
+function m4model(pos, yaw, scale = 1, pitch = 0) {
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const m = new Float32Array(16);
+  m[0] = c * scale; m[2] = -s * scale;
+  m[4] = sp * s * scale; m[5] = cp * scale; m[6] = sp * c * scale;
+  m[8] = cp * s * scale; m[9] = -sp * scale; m[10] = cp * c * scale;
+  m[12] = pos[0]; m[13] = pos[1]; m[14] = pos[2]; m[15] = 1;
+  return m;
+}
+
+export class Entities {
+  constructor(gl) {
+    this.gl = gl;
+
+    /* glider */
+    const manta = buildManta();
+    this.gliderMesh = new Mesh(gl);
+    this.gliderMesh.attrib(0, 3); this.gliderMesh.attrib(1, 3);
+    this.gliderMesh.upload(manta.verts, manta.idx);
+    this.gliderProg = createProgram(gl, GLIDER_VS, GLIDER_FS);
+    this.gu = uniforms(gl, this.gliderProg);
+
+    /* trails */
+    this.trailProg = createProgram(gl, TRAIL_VS, TRAIL_FS);
+    this.tu = uniforms(gl, this.trailProg);
+    this.trailMesh = new Mesh(gl, { dynamic: true });
+    this.trailMesh.attrib(0, 3); this.trailMesh.attrib(1, 2);
+    this.trails = [makeTrailState(), makeTrailState()];
+
+    /* birds */
+    this.birdProg = createProgram(gl, BIRD_VS, BIRD_FS);
+    this.bu2 = uniforms(gl, this.birdProg);
+    const birdVerts = new Float32Array([
+      0, 0, 0.45,  -1.0, 0, -0.35,  -0.14, 0.09, -0.28,
+      0, 0, 0.45,  -0.14, 0.09, -0.28,  0, 0, -0.5,
+      0, 0, 0.45,   0.14, 0.09, -0.28,  1.0, 0, -0.35,
+      0, 0, 0.45,   0, 0, -0.5,  0.14, 0.09, -0.28,
+    ]);
+    this.birdMesh = new Mesh(gl, { dynamic: true });
+    this.birdMesh.attrib(0, 3);
+    this.birdMesh.upload(birdVerts);
+    this.birdInstBuf = gl.createBuffer();
+    this.birdData = new Float32Array(BIRDS_MAX * 8);
+    attachInstances(gl, this.birdMesh, this.birdInstBuf, [
+      { loc: 1, size: 4, offset: 0 }, { loc: 2, size: 4, offset: 16 },
+    ], 1);
+
+    /* shards */
+    this.billProg = createProgram(gl, BILLBOARD_VS, BILLBOARD_FS);
+    this.blu = uniforms(gl, this.billProg);
+    const corners = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
+    this.billMesh = new Mesh(gl, { dynamic: true });
+    this.billMesh.attrib(0, 2);
+    this.billMesh.upload(corners);
+    this.billMesh.mode = gl.TRIANGLE_STRIP;
+    this.billInstBuf = gl.createBuffer();
+    attachInstances(gl, this.billMesh, this.billInstBuf, [
+      { loc: 1, size: 4, offset: 0 }, { loc: 2, size: 4, offset: 16 },
+    ], 1);
+    this.billData = new Float32Array(512 * 8);
+
+    /* beacon */
+    const bez = buildBeacon();
+    this.beaconMesh = new Mesh(gl);
+    this.beaconMesh.attrib(0, 3); this.beaconMesh.attrib(1, 3);
+    this.beaconMesh.upload(bez.verts, bez.idx);
+    this.beaconProg = createProgram(gl, BEACON_VS, BEACON_FS);
+    this.bku = uniforms(gl, this.beaconProg);
+
+    /* crystals */
+    const cr = buildCrystal();
+    this.crystalMesh = new Mesh(gl);
+    this.crystalMesh.attrib(0, 3);
+    this.crystalMesh.upload(cr.verts, cr.idx);
+    this.crystalProg = createProgram(gl, CRYSTAL_VS, CRYSTAL_FS);
+    this.cru = uniforms(gl, this.crystalProg);
+    this.crystalInstBuf = gl.createBuffer();
+    this.crystalData = new Float32Array(600 * 8);
+    attachInstances(gl, this.crystalMesh, this.crystalInstBuf, [
+      { loc: 1, size: 4, offset: 0 }, { loc: 2, size: 4, offset: 16 },
+    ], 1);
+
+    /* pillar */
+    this.pillarProg = createProgram(gl, PILLAR_VS, PILLAR_FS);
+    this.pu = uniforms(gl, this.pillarProg);
+    this.pillarMesh = new Mesh(gl, { dynamic: true });
+    this.pillarMesh.attrib(0, 3);
+    {
+      const SEG = 12;
+      const verts = [];
+      for (let y = 0; y <= 2; y++) {
+        for (let s = 0; s <= SEG; s++) {
+          const a = (s / SEG) * Math.PI * 2;
+          verts.push(Math.cos(a), y / 2, Math.sin(a));
+        }
+      }
+      const idx = [];
+      for (let r = 0; r < 2; r++) {
+        for (let s = 0; s < SEG; s++) {
+          const a = r * (SEG + 1) + s, b = a + 1, c = a + SEG + 1, d = c + 1;
+          idx.push(a, b, d, a, d, c);
+        }
+      }
+      this.pillarMesh.upload(new Float32Array(verts), new Uint32Array(idx));
+    }
+    this.pillarInstBuf = gl.createBuffer();
+    this.pillarInst = new Float32Array(8);
+    attachInstances(gl, this.pillarMesh, this.pillarInstBuf, [
+      { loc: 1, size: 4, offset: 0 },
+    ], 1);
+
+    /* particles */
+    this.partProg = createProgram(gl, PARTICLE_VS, PARTICLE_FS);
+    this.pau = uniforms(gl, this.partProg);
+    this.partMesh = new Mesh(gl, { dynamic: true });
+    this.partMesh.attrib(0, 3); this.partMesh.attrib(1, 4);
+    this.partMesh.mode = gl.POINTS;
+    this.particles = [];
+    this.partData = new Float32Array(4096 * 7);
+
+    this.time = 0;
+    this.birdCount = 0;
+    this.shardCount = 0;
+    this.crystalCount = 0;
+    this.beacons = [];
+    this.shards = [];
+    this.shardDraw = [];
+    this.crystals = [];
+    this.thermals = [];
+  }
+
+  /* deterministic world population relative to spawn */
+  populate(spawn) {
+    const rng = mulberry32(424242);
+
+    /* beacons: spread around spawn on high ground (relaxed fallback if needed) */
+    this.beacons = [];
+    const baseYaw = rng() * Math.PI * 2;
+    for (let i = 0; i < 5; i++) {
+      const dist = 900 + i * 420 + rng() * 260;
+      const yaw = baseYaw + i * (Math.PI * 2 / 5) + (rng() - 0.5) * 0.9;
+      let best = null;
+      for (let relax = 0; relax < 3 && !best; relax++) {
+        const minH = [WORLD.WATER_LEVEL + 8, WORLD.WATER_LEVEL + 3, WORLD.WATER_LEVEL + 1][relax];
+        const spread = [1.1, 2.2, 4.0][relax];
+        for (let k = 0; k < 60; k++) {
+          const r = dist * (0.7 + rng() * 0.7) * (1 + relax * 0.35);
+          const a = yaw + (rng() - 0.5) * spread;
+          const x = spawn[0] + Math.cos(a) * r, z = spawn[2] + Math.sin(a) * r;
+          const h = terrainHeight(x, z);
+          if (h < minH) continue;
+          if (!best || h > best.h) best = { x, z, h };
+        }
+      }
+      if (!best) break;
+      const pos = [best.x, best.h, best.z];
+      this.beacons.push({
+        pos,
+        yaw: rng() * Math.PI * 2,
+        model: m4model([best.x, best.h - 1.5, best.z], rng() * Math.PI * 2),
+        lit: 0,
+        target: 0,
+      });
+    }
+
+    /* thermals */
+    this.thermals = [];
+    for (let i = 0; i < 16; i++) {
+      const r = 500 + rng() * 2300;
+      const a = rng() * Math.PI * 2;
+      const x = spawn[0] + Math.cos(a) * r, z = spawn[2] + Math.sin(a) * r;
+      const h = terrainHeight(x, z);
+      if (h < WORLD.WATER_LEVEL + 4) { i--; continue; }
+      this.thermals.push({ pos: [x, h, z], top: h + 420 + rng() * 260, r: 62 + rng() * 30, strength: 0.7 + rng() * 0.6 });
+    }
+
+    /* shards: rings near beacons + strings between */
+    this.shards = [];
+    const addShard = (x, y, z) => this.shards.push({ pos: [x, y, z], alive: true, ph: rng() });
+    for (const b of this.beacons) {
+      const n = 9 + (rng() * 5 | 0);
+      for (let i = 0; i < n; i++) {
+        const a = rng() * Math.PI * 2, r = 46 + rng() * 130;
+        const x = b.pos[0] + Math.cos(a) * r, z = b.pos[2] + Math.sin(a) * r;
+        const h = terrainHeight(x, z);
+        const gy = Math.max(h, WORLD.WATER_LEVEL);
+        addShard(x, gy + 16 + rng() * 40, z);
+      }
+    }
+    /* strings linking consecutive beacons */
+    for (let i = 0; i < this.beacons.length; i++) {
+      const A = this.beacons[i].pos, B = this.beacons[(i + 1) % this.beacons.length].pos;
+      const n = 13;
+      for (let k = 1; k <= n; k++) {
+        const t = k / (n + 1);
+        const x = lerp(A[0], B[0], t), z = lerp(A[2], B[2], t);
+        const gy = Math.max(terrainHeight(x, z), WORLD.WATER_LEVEL);
+        addShard(x, gy + 26 + Math.sin(t * Math.PI) * 60 + rng() * 22, z);
+      }
+    }
+    /* starter trail from spawn */
+    {
+      const yaw = rng() * Math.PI * 2;
+      for (let k = 0; k < 9; k++) {
+        const x = spawn[0] + Math.cos(yaw) * (90 + k * 55) + (rng() - 0.5) * 40;
+        const z = spawn[2] + Math.sin(yaw) * (90 + k * 55) + (rng() - 0.5) * 40;
+        const gy = Math.max(terrainHeight(x, z), WORLD.WATER_LEVEL);
+        addShard(x, gy + 20 + rng() * 26, z);
+      }
+    }
+
+    /* crystals: around beacons + wild */
+    this.crystals = [];
+    for (const b of this.beacons) {
+      const n = 5 + (rng() * 5 | 0);
+      for (let i = 0; i < n; i++) {
+        const a = rng() * Math.PI * 2, r = 14 + rng() * 42;
+        const x = b.pos[0] + Math.cos(a) * r, z = b.pos[2] + Math.sin(a) * r;
+        this.crystals.push({ pos: [x, terrainHeight(x, z) - 0.4, z], s: 1.6 + rng() * 3.4, rot: rng() * 6.28, near: true });
+      }
+    }
+    for (let i = 0; i < 26; i++) {
+      const r = 300 + rng() * 2400, a = rng() * Math.PI * 2;
+      const x = spawn[0] + Math.cos(a) * r, z = spawn[2] + Math.sin(a) * r;
+      const h = terrainHeight(x, z);
+      if (h < WORLD.WATER_LEVEL + 6) continue;
+      this.crystals.push({ pos: [x, h - 0.4, z], s: 0.9 + rng() * 2.4, rot: rng() * 6.28, near: false });
+    }
+    /* loose field shards along scenic arcs */
+    for (let i = 0; i < 34; i++) {
+      const r = 200 + rng() * 2200, a = rng() * Math.PI * 2;
+      const x = spawn[0] + Math.cos(a) * r, z = spawn[2] + Math.sin(a) * r;
+      const gy = Math.max(terrainHeight(x, z), WORLD.WATER_LEVEL);
+      addShard(x, gy + 14 + rng() * 60, z);
+    }
+
+    /* flocks */
+    this.flocks = [];
+    for (let f = 0; f < 3; f++) {
+      const r = 500 + rng() * 1800, a = rng() * Math.PI * 2;
+      const x = spawn[0] + Math.cos(a) * r, z = spawn[2] + Math.sin(a) * r;
+      const gy = Math.max(terrainHeight(x, z), WORLD.WATER_LEVEL);
+      const flock = { x, z, y: gy + 80 + rng() * 90, n: 22 + (rng() * 16 | 0), birds: [] };
+      for (let i = 0; i < flock.n; i++) {
+        flock.birds.push({ a: rng() * 6.28, va: 0.22 + rng() * 0.2, r: 26 + rng() * 60, h: (rng() - 0.5) * 30, ph: rng(), s: 0.75 + rng() * 0.9 });
+      }
+      this.flocks.push(flock);
+    }
+  }
+
+  igniteBeacon(b) {
+    b.target = 1;
+    this.spawnBurst([b.pos[0], b.pos[1] + 14, b.pos[2]], 60, 0);
+    this.spawnBurst([b.pos[0], b.pos[1] + 30, b.pos[2]], 40, 0);
+  }
+
+  collectShard(s) {
+    s.alive = false;
+    this.spawnBurst(s.pos, 24, 0);
+  }
+
+  spawnBurst(pos, n = 26, hue = 0) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = 5 + Math.random() * 15;
+      this.particles.push({
+        p: [...pos],
+        v: [Math.cos(a) * s, Math.random() * 14 + 2, Math.sin(a) * s],
+        life: 1, decay: 1.0 + Math.random() * 1.2,
+        size: 1.6 + Math.random() * 2.4, hue,
+      });
+    }
+  }
+
+  update(dt, game) {
+    this.time += dt;
+    const ship = game.ship;
+
+    /* wingtip trails */
+    for (let w = 0; w < 2; w++) {
+      const st = this.trails[w];
+      const tip = ship.wingTip(w);
+      const last = st.points[(st.head - 0 + TRAIL_SEGS) % TRAIL_SEGS];
+      if (!st.count || v3.dist(tip, last) > 1.3) {
+        st.head = (st.head + 1) % TRAIL_SEGS;
+        st.points[st.head] = tip;
+        st.count = Math.min(st.count + 1, TRAIL_SEGS);
+      }
+    }
+
+    /* beacon lit easing */
+    for (const b of this.beacons) b.lit = lerp(b.lit, b.target, 1 - Math.exp(-dt * 1.6));
+
+    /* particles */
+    const ps = this.particles;
+    for (let i = ps.length - 1; i >= 0; i--) {
+      const p = ps[i];
+      p.life -= p.decay * dt;
+      if (p.life <= 0) { ps[i] = ps[ps.length - 1]; ps.pop(); continue; }
+      p.p[0] += p.v[0] * dt; p.p[1] += p.v[1] * dt; p.p[2] += p.v[2] * dt;
+      p.v[1] -= 7 * dt;
+      p.v[0] *= (1 - 1.4 * dt); p.v[2] *= (1 - 1.4 * dt);
+    }
+    if (ps.length > 3400) ps.splice(0, ps.length - 3400);
+
+    /* thermal dust: keep each thermal lightly fed */
+    if (game.frame % 7 === 0) {
+      for (const th of this.thermals) {
+        const d = v3.dist2([ship.pos[0], 0, ship.pos[2]], [th.pos[0], 0, th.pos[2]]);
+        if (d > 2600 * 2600) continue;
+        const a = Math.random() * Math.PI * 2;
+        const r = th.r * (0.4 + Math.random() * 0.8);
+        ps.push({
+          p: [th.pos[0] + Math.cos(a) * r, th.pos[1] + Math.random() * 30, th.pos[2] + Math.sin(a) * r],
+          v: [Math.sin(a + 1.6) * 4, 16 + Math.random() * 8, Math.cos(a + 1.6) * 4],
+          life: 1, decay: 0.16, size: 1.1 + Math.random() * 1.2, hue: 1,
+        });
+      }
+    }
+
+    /* ambient motes */
+    if (Math.random() < 0.35 && ps.length < 2800) {
+      const r = 50 + Math.random() * 170;
+      const a = Math.random() * Math.PI * 2;
+      const x = ship.pos[0] + Math.cos(a) * r, z = ship.pos[2] + Math.sin(a) * r;
+      const gy = Math.max(terrainHeight(x, z), WORLD.WATER_LEVEL);
+      ps.push({ p: [x, gy + 2 + Math.random() * 50, z], v: [7, 1, 3], life: 1, decay: 0.07, size: 0.8 + Math.random() * 1.3, hue: 0 });
+    }
+
+    /* birds follow their flocks */
+    let w = 0;
+    for (const f of this.flocks) {
+      for (const b of f.birds) {
+        b.a += b.va * dt;
+        const x = f.x + Math.cos(b.a) * b.r;
+        const z = f.z + Math.sin(b.a) * b.r;
+        const y = Math.max(f.y + b.h + Math.sin(this.time * 0.9 + b.ph) * 6, terrainHeight(x, z) + 12);
+        this.birdData[w++] = x; this.birdData[w++] = y; this.birdData[w++] = z; this.birdData[w++] = -b.a;
+        this.birdData[w++] = b.ph; this.birdData[w++] = b.s; this.birdData[w++] = 0; this.birdData[w++] = 0;
+      }
+    }
+    this.birdCount = w / 8;
+
+    /* visible shard set for the billboard pass (distance-culled) */
+    this.shardDraw.length = 0;
+    for (const s of this.shards) {
+      if (!s.alive) continue;
+      const dx = s.pos[0] - ship.pos[0], dz = s.pos[2] - ship.pos[2];
+      if (dx * dx + dz * dz > 3400 * 3400) continue;
+      this.shardDraw.push(s);
+    }
+  }
+
+  setLightUniforms(u, env, viewProj, cam) {
+    const gl = this.gl;
+    gl.uniformMatrix4fv(u.uViewProj, false, viewProj);
+    gl.uniform3fv(u.uLightDir, env.lightDir);
+    gl.uniform3fv(u.uSunColor, env.sunColor);
+    gl.uniform3fv(u.uSkyAmbient, env.skyAmbient);
+    gl.uniform3fv(u.uGroundAmbient, env.groundAmbient);
+    gl.uniform3fv(u.uFogColor, env.fogColor);
+    gl.uniform1f(u.uFogDensity, env.fogDensity);
+    gl.uniform3fv(u.uCamPos, cam.pos);
+    gl.uniform1f(u.uNight, env.night);
+  }
+
+  drawOpaque(env, view, proj, viewProj, cam, renderer) {
+    const gl = this.gl;
+
+    gl.useProgram(this.gliderProg);
+    this.setLightUniforms(this.gu, env, viewProj, cam);
+    gl.uniform1f(this.gu.uTime, this.time);
+    gl.uniform1f(this.gu.uFlap, 0.9);
+    gl.uniform3f(this.gu.uGlowColor, 1.6, 1.1, 0.5);
+    gl.uniform1f(this.gu.uGlowAmt, this.game ? this.game.glowPulse : 0);
+    gl.uniformMatrix4fv(this.gu.uModel, false, this._shipMat);
+    this.gliderMesh.draw();
+
+    if (this.birdCount > 0) {
+      gl.useProgram(this.birdProg);
+      this.setLightUniforms(this.bu2, env, viewProj, cam);
+      gl.uniform1f(this.bu2.uTime, this.time);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.birdInstBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, this.birdData.subarray(0, this.birdCount * 8), gl.DYNAMIC_DRAW);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, this.birdMesh.count, this.birdCount);
+    }
+
+    gl.useProgram(this.beaconProg);
+    this.setLightUniforms(this.bku, env, viewProj, cam);
+    gl.uniform1f(this.bku.uTime, this.time);
+    for (const b of this.beacons) {
+      gl.uniform1f(this.bku.uLit, b.lit);
+      gl.uniformMatrix4fv(this.bku.uModel, false, b.model);
+      this.beaconMesh.draw();
+    }
+
+    if (this.crystals.length > 0) {
+      gl.useProgram(this.crystalProg);
+      this.setLightUniforms(this.cru, env, viewProj, cam);
+      let w = 0;
+      for (const c of this.crystals) {
+        let glow = 0.16;
+        for (const b of this.beacons) {
+          const d = v3.dist(c.pos, b.pos);
+          glow = Math.max(glow, b.lit * clamp01(1.4 - d / 160) * 1.3);
+        }
+        this.crystalData[w++] = c.pos[0]; this.crystalData[w++] = c.pos[1]; this.crystalData[w++] = c.pos[2]; this.crystalData[w++] = c.s;
+        this.crystalData[w++] = c.rot; this.crystalData[w++] = glow; this.crystalData[w++] = 0; this.crystalData[w++] = 0;
+      }
+      this.crystalCount = w / 8;
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.crystalInstBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, this.crystalData.subarray(0, w), gl.DYNAMIC_DRAW);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, this.crystalMesh.count, this.crystalCount);
+    }
+  }
+
+  renderShadowPass(terrain, gl) {
+    /* beacon stones cast shadows onto the sand */
+    gl.useProgram(terrain.depthProg);
+    gl.uniform2f(terrain.du.uWorldOffset, 0, 0);
+    gl.uniform1f(terrain.du.uSpacing, 1);
+    for (const b of this.beacons) {
+      gl.uniformMatrix4fv(terrain.du.uLightViewProj, false, terrain.lightViewProj);
+      gl.uniformMatrix4fv(terrain.du.uModel, false, b.model);
+      this.beaconMesh.draw();
+    }
+  }
+
+  drawAdditive(env, view, proj, viewProj, cam, renderer) {
+    const gl = this.gl;
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    gl.depthMask(false);
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+
+    /* trails */
+    if (this._trailFloats) {
+      gl.useProgram(this.trailProg);
+      gl.uniformMatrix4fv(this.tu.uViewProj, false, viewProj);
+      gl.uniform3fv(this.tu.uCamPos, cam.pos);
+      gl.uniform1f(this.tu.uWidth, 0.22);
+      gl.uniform3f(this.tu.uColor, 1.5, 0.95, 0.42);
+      gl.uniform1f(this.tu.uFade, 1.0);
+      this.trailMesh.upload(this._trailFloats);
+      this.trailMesh.draw();
+    }
+
+    /* shards */
+    if (this.shardDraw.length > 0) {
+      gl.useProgram(this.billProg);
+      gl.uniformMatrix4fv(this.blu.uViewProj, false, viewProj);
+      gl.uniform3fv(this.blu.uCamRight, this._camRight);
+      gl.uniform3fv(this.blu.uCamUp, this._camUp);
+      gl.uniform1f(this.blu.uTime, this.time);
+      gl.uniform3f(this.blu.uColor, 1.65, 1.15, 0.5);
+      let w = 0;
+      for (const s of this.shardDraw) {
+        this.billData[w++] = s.pos[0]; this.billData[w++] = s.pos[1]; this.billData[w++] = s.pos[2]; this.billData[w++] = 3.4;
+        this.billData[w++] = s.ph; this.billData[w++] = 1; this.billData[w++] = 0; this.billData[w++] = 1;
+      }
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.billInstBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, this.billData.subarray(0, w), gl.DYNAMIC_DRAW);
+      gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, w / 8);
+    }
+
+    /* pillars */
+    gl.useProgram(this.pillarProg);
+    gl.uniformMatrix4fv(this.pu.uViewProj, false, viewProj);
+    gl.uniform1f(this.pu.uTime, this.time);
+    for (const b of this.beacons) {
+      if (b.lit <= 0.01) continue;
+      this.pillarInst[0] = b.pos[0]; this.pillarInst[1] = b.pos[1] + 10; this.pillarInst[2] = b.pos[2]; this.pillarInst[3] = 4.5;
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.pillarInstBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, this.pillarInst, gl.DYNAMIC_DRAW);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, this.pillarMesh.count, 1);
+    }
+
+    /* particles */
+    if (this.particles.length > 0) {
+      gl.useProgram(this.partProg);
+      gl.uniformMatrix4fv(this.pau.uViewProj, false, viewProj);
+      gl.uniform3fv(this.pau.uCamPos, cam.pos);
+      let w = 0;
+      for (const p of this.particles) {
+        this.partData[w++] = p.p[0]; this.partData[w++] = p.p[1]; this.partData[w++] = p.p[2];
+        this.partData[w++] = p.size; this.partData[w++] = clamp01(p.life) * 0.55; this.partData[w++] = p.hue; this.partData[w++] = 0;
+      }
+      gl.bindVertexArray(this.partMesh.vao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.partMesh.vbo);
+      gl.bufferData(gl.ARRAY_BUFFER, this.partData.subarray(0, w), gl.DYNAMIC_DRAW);
+      const stride = 28;
+      gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
+      gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 4, gl.FLOAT, false, stride, 12);
+      gl.drawArrays(gl.POINTS, 0, w / 7);
+      gl.bindVertexArray(null);
+    }
+
+    gl.depthMask(true);
+    gl.disable(gl.BLEND);
+  }
+
+  /* called by game each frame after ship update */
+  syncShip(ship, view) {
+    this._shipMat = ship.matrix();
+    if (!view) return;
+    this._camRight = [view[0], view[4], view[8]];
+    this._camUp = [view[1], view[5], view[9]];
+
+    /* rebuild trail ribbons */
+    const floats = [];
+    for (const st of this.trails) {
+      if (st.count < 2) continue;
+      const pts = [];
+      for (let k = 0; k < st.count; k++) {
+        const idx = ((st.head - k) % TRAIL_SEGS + TRAIL_SEGS) % TRAIL_SEGS;
+        pts.push(st.points[idx]);
+      }
+      for (let k = 0; k < pts.length - 1; k++) {
+        const u0 = k / (pts.length - 1), u1 = (k + 1) / (pts.length - 1);
+        floats.push(...pts[k], u0, -1, ...pts[k], u0, 1, ...pts[k + 1], u1, -1);
+        floats.push(...pts[k + 1], u1, -1, ...pts[k + 1], u1, 1, ...pts[k], u0, 1);
+      }
+    }
+    this._trailFloats = floats.length ? new Float32Array(floats) : null;
+  }
+}
+
+function makeTrailState() {
+  return { points: new Array(TRAIL_SEGS), head: 0, count: 0 };
+}
