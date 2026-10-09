@@ -11,14 +11,22 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; overflow: hidden; background: #06070c; }
   body {
-    font-family: Georgia, 'Times New Roman', serif;
+    font-family: 'Courier New', Courier, ui-monospace, monospace;
     color: #e8dcc8;
-    -webkit-font-smoothing: antialiased;
+    -webkit-font-smoothing: none;
     user-select: none;
     -webkit-user-select: none;
+    -webkit-touch-callout: none;
     touch-action: none;
   }
-  #gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  /* the world is drawn into a tiny buffer and integer-upscaled: every pixel is a block */
+  #gl {
+    position: fixed; left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    display: block;
+  }
 
   .veil {
     position: fixed; inset: 0; z-index: 10;
@@ -29,12 +37,12 @@
   }
   .veil.gone { opacity: 0; }
   .title {
-    font-size: clamp(3.4rem, 9vw, 6.5rem);
-    font-weight: 400; font-style: normal;
-    letter-spacing: 0.42em; text-indent: 0.42em;
-    color: #f2e8d5;
-    text-shadow: 0 0 34px rgba(255, 190, 120, 0.35), 0 2px 30px rgba(0,0,0,0.6);
-    animation: breathe 7s ease-in-out infinite;
+    font-size: clamp(3.2rem, 8.6vw, 6.2rem);
+    font-weight: 700; font-style: normal;
+    letter-spacing: 0.38em; text-indent: 0.38em;
+    color: #f6ecd6;
+    text-shadow: 0.045em 0.045em 0 #3a1f28, 0.09em 0.09em 0 #170d14, 0 0 44px rgba(255, 190, 120, 0.30);
+    animation: breathe 7s steps(2, jump-none) infinite;
   }
   @keyframes breathe { 0%,100% { opacity: 0.92 } 50% { opacity: 1 } }
   .subtitle {
@@ -64,9 +72,10 @@
   #hud.on { opacity: 1; }
   .dial {
     position: absolute; font-size: 0.68rem; letter-spacing: 0.28em; text-indent: 0.28em;
-    color: rgba(238, 224, 196, 0.82);
-    text-shadow: 0 1px 12px rgba(0,0,0,0.8);
+    color: rgba(238, 224, 196, 0.85);
+    text-shadow: 1px 1px 0 rgba(10, 6, 12, 0.9);
   }
+  .title, .subtitle, .hint, .colophon { text-rendering: geometricPrecision; }
   #speed { left: 4vw; bottom: 9vh; }
   #alt { left: 4vw; bottom: 12.2vh; }
   #shards { right: 4vw; top: 8vh; text-align: right; }
@@ -136,6 +145,50 @@
     #hud.on ~ #boost-btn { opacity: 0.85; }
   }
 
+  /* thumb stick */
+  #stick, #stick-knob {
+    position: fixed; left: 0; top: 0; z-index: 6; pointer-events: none;
+    border-radius: 50%; opacity: 0; transition: opacity 0.25s ease;
+  }
+  #stick {
+    width: 116px; height: 116px;
+    border: 2px solid rgba(240, 220, 180, 0.35);
+    background: radial-gradient(circle, rgba(240,220,180,0.06), rgba(240,220,180,0.0) 70%);
+  }
+  #stick-knob {
+    width: 34px; height: 34px;
+    background: rgba(246, 232, 200, 0.35);
+    border: 2px solid rgba(246, 232, 200, 0.55);
+  }
+  #stick.on, #stick-knob.on { opacity: 1; }
+  #stick.on { opacity: 0.85; }
+
+  @media (max-width: 640px) {
+    .hint { font-size: 0.62rem; letter-spacing: 0.2em; text-indent: 0.2em; padding: 0 1rem; }
+    .colophon { font-size: 0.54rem; letter-spacing: 0.08em; padding: 0 1rem; }
+    #compass { top: 5vh; }
+    #shards { top: 7vh; }
+    #beacons { top: 12vh; font-size: 0.58rem; }
+    .dial { font-size: 0.6rem; }
+    #lore { bottom: 24vh; font-size: 0.85rem; }
+    #charge { bottom: 17vh; font-size: 0.62rem; }
+  }
+
+  #menu-btn {
+    position: fixed; right: 5vw; bottom: calc(9vh + 104px); z-index: 6;
+    width: 46px; height: 46px; border-radius: 50%;
+    border: 1px solid rgba(255, 220, 160, 0.4);
+    background: rgba(20, 14, 20, 0.55);
+    color: rgba(245, 230, 196, 0.85); font: inherit; font-size: 0.72rem;
+    display: none; align-items: center; justify-content: center;
+    pointer-events: auto; touch-action: none; user-select: none;
+    opacity: 0; transition: opacity 0.8s ease;
+  }
+  @media (hover: none) and (pointer: coarse) {
+    #menu-btn { display: flex; }
+    #hud.on ~ #menu-btn { opacity: 0.8; }
+  }
+
   #photo-bar {
     position: fixed; left: 50%; bottom: 3.2vh; transform: translateX(-50%); z-index: 7;
     display: flex; gap: 1.6rem; align-items: baseline;
@@ -157,6 +210,12 @@
   }
   .overlay input[type=range] { width: 170px; accent-color: #d9a75e; }
   .overlay input[type=checkbox] { accent-color: #d9a75e; width: 18px; height: 18px; }
+  .overlay select {
+    font: inherit; font-size: 0.7rem; letter-spacing: 0.2em;
+    color: #f2e8d5; background: rgba(255, 220, 160, 0.07);
+    border: 1px solid rgba(255, 220, 160, 0.35); border-radius: 2px;
+    padding: 0.35rem 0.6rem; outline: none;
+  }
   .overlay .buttons { display: flex; gap: 1rem; margin-top: 1.6rem; }
   .overlay button {
     font: inherit; font-size: 0.72rem; letter-spacing: 0.26em; text-indent: 0.26em;
@@ -225,6 +284,9 @@
 <div id="charge">THE BEACON STIRS</div>
 <div id="lore"></div>
 <button id="boost-btn" type="button" aria-label="Burn light for speed">BURN</button>
+<div id="stick"></div>
+<div id="stick-knob"></div>
+<button id="menu-btn" type="button" aria-label="Settings">III</button>
 
 <div id="photo-bar">
   <span class="pf-title">PHOTO</span>
@@ -237,6 +299,17 @@
   <h2>SETTINGS</h2>
   <label>LOOK SENSITIVITY <input type="range" id="set-sens" min="0.4" max="2.4" step="0.05" value="1"></label>
   <label>INVERT VERTICAL <input type="checkbox" id="set-invert"></label>
+  <label>PIXEL SIZE <select id="set-pixel">
+    <option value="320">CHUNKY</option>
+    <option value="480" selected>CLASSIC</option>
+    <option value="720">FINE</option>
+  </select></label>
+  <label>PALETTE <select id="set-palette">
+    <option value="1" selected>DUSK</option>
+    <option value="2">EMBER</option>
+    <option value="3">MONO</option>
+    <option value="0">SMOOTH</option>
+  </select></label>
   <label>AUTO QUALITY <input type="checkbox" id="set-autoq" checked></label>
   <label>QUALITY <input type="range" id="set-quality" min="0.5" max="1" step="0.05" value="1"></label>
   <p class="meta" id="set-meta">seed — · 0 / 5 beacons</p>
@@ -247,7 +320,7 @@
   <p class="meta">progress is saved for this world · O closes</p>
 </div>
 
-<div class="overlay" id="pause"><h2>DRIFTING</h2><p>press P or click to continue</p></div>
+<div class="overlay" id="pause"><h2>DRIFTING</h2><p>press P or tap to continue</p></div>
 <div id="finale"><div class="big">THE WORLD REMEMBERS THE LIGHT</div><div class="small">fly on, as long as you like</div></div>
 <pre id="err"></pre>
 <pre id="dbg" style="position:fixed;top:8px;left:8px;z-index:30;font:11px ui-monospace,monospace;color:#9fe8c8;background:rgba(4,8,6,.6);padding:4px 8px;border-radius:4px;display:none;pointer-events:none;"></pre>

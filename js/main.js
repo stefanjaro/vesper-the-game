@@ -84,11 +84,35 @@ game.loadGame();
 
 /* stored options */
 const OPT_KEY = 'vesper:opts';
-let opts = { sens: 1, invert: false, autoq: true, quality: 1 };
+const PIXEL_PRESETS = { chunky: 320, classic: 480, fine: 720 };
+const PALETTE_PRESETS = { smooth: 0, dusk: 1, ember: 2, mono: 3 };
+let opts = { sens: 1, invert: false, autoq: true, quality: 1, pixel: 480, palette: 1 };
 try { opts = Object.assign(opts, JSON.parse(localStorage.getItem(OPT_KEY) || '{}')); } catch (e) {}
+if (params.has('pixel')) {
+  const v = params.get('pixel');
+  opts.pixel = PIXEL_PRESETS[v] || parseInt(v, 10) || 480;
+}
+if (params.has('palette')) {
+  const v = params.get('palette');
+  const byName = PALETTE_PRESETS[v];
+  opts.palette = byName !== undefined ? byName : (parseInt(v, 10) || 0);
+}
 game.input.sensitivity = opts.sens;
 game.input.invertY = !!opts.invert;
 if (!opts.autoq) { renderer.quality = opts.quality; game.qualityLock = true; }
+renderer.capPixels = opts.pixel;
+renderer.palette = opts.palette;
+
+/* phones: thumbs, not keyboards */
+const coarsePointer = window.matchMedia && matchMedia('(hover: none) and (pointer: coarse)').matches;
+if (coarsePointer) {
+  const hint = document.getElementById('hint');
+  const tips = document.getElementById('tips');
+  if (hint) hint.textContent = 'TAP TO BEGIN';
+  if (tips) tips.textContent = 'drag to steer · BURN for speed · wake the beacons';
+  document.getElementById('boost-btn').style.display = 'flex';
+  document.getElementById('menu-btn').style.display = 'flex';
+}
 
 window.__game = game;
 window.__terrain = terrain;
@@ -202,6 +226,16 @@ document.getElementById('set-quality').addEventListener('input', (e) => {
   }
   OPT_KEY_CHECK();
 });
+document.getElementById('set-pixel').addEventListener('change', (e) => {
+  opts.pixel = parseInt(e.target.value, 10);
+  renderer.capPixels = opts.pixel;
+  OPT_KEY_CHECK();
+});
+document.getElementById('set-palette').addEventListener('change', (e) => {
+  opts.palette = parseInt(e.target.value, 10);
+  renderer.palette = opts.palette;
+  OPT_KEY_CHECK();
+});
 document.getElementById('set-new').addEventListener('click', () => {
   try { localStorage.removeItem(game.saveKey); } catch (e) {}
   location.reload();
@@ -210,6 +244,13 @@ document.getElementById('set-sens').value = opts.sens;
 document.getElementById('set-invert').checked = !!opts.invert;
 document.getElementById('set-autoq').checked = !!opts.autoq;
 document.getElementById('set-quality').value = opts.quality;
+document.getElementById('set-pixel').value = String(opts.pixel);
+document.getElementById('set-palette').value = String(opts.palette);
+
+/* the settings button is the phone's only menu */
+document.getElementById('menu-btn').addEventListener('click', () => {
+  openSettings(!overlay.classList.contains('on'));
+});
 
 /* save the day position on the way out */
 addEventListener('beforeunload', () => game.saveGame());

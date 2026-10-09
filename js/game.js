@@ -73,6 +73,10 @@ export class Input {
     this.gamepad = null;
     this.sensitivity = 1;
     this.invertY = false;
+    this.stickId = null;
+    this.stickOrigin = { x: 0, y: 0 };
+    this.stickX = 0;
+    this.stickY = 0;
 
     const boostBtn = document.getElementById('boost-btn');
     if (boostBtn) {
@@ -91,9 +95,12 @@ export class Input {
     addEventListener('keyup', (e) => { this.keys[e.code] = false; });
 
     canvas.addEventListener('click', () => {
-      if (!this.pointerLocked && canvas.requestPointerLock) {
-        canvas.requestPointerLock();
-      }
+      if (this.pointerLocked) return;
+      /* pointer lock is a desktop convenience; phones steer with a thumb */
+      const fine = window.matchMedia && matchMedia('(hover: hover) and (pointer: fine)').matches;
+      if (!fine) return;
+      const req = canvas.requestPointerLock && canvas.requestPointerLock();
+      if (req && req.catch) req.catch(() => {});
     });
     document.addEventListener('pointerlockchange', () => {
       this.pointerLocked = document.pointerLockElement === canvas;
@@ -105,23 +112,39 @@ export class Input {
       }
     });
 
-    /* touch steering */
-    let lastTouch = null;
-    canvas.addEventListener('touchstart', (e) => {
-      lastTouch = e.touches[0];
-      this.touch.active = true;
-      e.preventDefault();
-    }, { passive: false });
-    canvas.addEventListener('touchmove', (e) => {
-      const t = e.touches[0];
-      if (lastTouch) {
-        this.touch.dx += (t.clientX - lastTouch.clientX) * 2.4;
-        this.touch.dy += (t.clientY - lastTouch.clientY) * 2.4;
-      }
-      lastTouch = t;
-      e.preventDefault();
-    }, { passive: false });
-    canvas.addEventListener('touchend', () => { this.touch.active = false; lastTouch = null; });
+    /* virtual joystick: touch or pen anywhere on the canvas */
+    const stickEl = document.getElementById('stick');
+    const knobEl = document.getElementById('stick-knob');
+    const STICK_R = 58;
+    const place = (el, x, y) => {
+      if (!el) return;
+      el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
+    };
+    canvas.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse') return;
+      if (this.stickId !== null) return;
+      this.stickId = e.pointerId;
+      this.stickOrigin = { x: e.clientX, y: e.clientY };
+      this.stickX = 0; this.stickY = 0;
+      try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      if (stickEl) stickEl.classList.add('on');
+      place(stickEl, e.clientX, e.clientY);
+      place(knobEl, e.clientX, e.clientY);
+    });
+    canvas.addEventListener('pointermove', (e) => {
+      if (e.pointerId !== this.stickId) return;
+      this.stickX = clamp((e.clientX - this.stickOrigin.x) / STICK_R, -1, 1);
+      this.stickY = clamp((e.clientY - this.stickOrigin.y) / STICK_R, -1, 1);
+      place(knobEl, this.stickOrigin.x + this.stickX * STICK_R, this.stickOrigin.y + this.stickY * STICK_R);
+    });
+    const release = (e) => {
+      if (e.pointerId !== this.stickId) return;
+      this.stickId = null;
+      this.stickX = 0; this.stickY = 0;
+      if (stickEl) stickEl.classList.remove('on');
+    };
+    canvas.addEventListener('pointerup', release);
+    canvas.addEventListener('pointercancel', release);
   }
 
   sample(dt) {
@@ -145,11 +168,9 @@ export class Input {
     const sign = this.invertY ? -1 : 1;
     r += this.mouseDX * 0.055 * this.sensitivity;
     p += -this.mouseDY * 0.045 * this.sensitivity * sign;  // mouse up = climb
-    if (this.touch.active) {
-      r += this.touch.dx * 0.045;
-      p += -this.touch.dy * 0.04 * sign;   // same convention as the mouse
-      this.touch.dx *= 0.4; this.touch.dy *= 0.4;
-    }
+    /* thumb stick: push up to climb, sideways to bank */
+    r += this.stickX * 1.15;
+    p += -this.stickY * 1.15 * sign;
     this.mouseDX *= Math.exp(-dt * 22);
     this.mouseDY *= Math.exp(-dt * 22);
 
@@ -317,8 +338,14 @@ export class Game {
       img.data.set(px.subarray(src, src + w * 4), y * w * 4);
     }
     ctx.putImageData(img, 0, 0);
+    /* export at 3× with crisp blocks so the pixels survive the trip */
+    const c3 = document.createElement('canvas');
+    c3.width = w * 3; c3.height = h * 3;
+    const ctx3 = c3.getContext('2d');
+    ctx3.imageSmoothingEnabled = false;
+    ctx3.drawImage(c2, 0, 0, c3.width, c3.height);
     const a = document.createElement('a');
-    a.href = c2.toDataURL('image/png');
+    a.href = c3.toDataURL('image/png');
     a.download = `vesper-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
     a.click();
   }

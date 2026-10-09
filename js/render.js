@@ -239,7 +239,7 @@ void main(){
   float ndh = clamp(dot(n, H), 0.0, 1.0);
   float spec = (pow(ndh, 240.0) * 1.35 + pow(ndh, 42.0) * 0.10) * detail * detail;
 
-  vec3 deep = vec3(0.05, 0.13, 0.16) * (uSkyAmbient * 2.2 + uGroundAmbient);
+  vec3 deep = vec3(0.10, 0.24, 0.27) * (uSkyAmbient * 2.4 + uGroundAmbient * 1.2);
   float thick = max(terrainDist - waterDist, 0.0);
   vec3 body = deep * (1.0 - exp(-thick * 0.28));
 
@@ -350,6 +350,62 @@ uniform float uFlash;       // white flash 0..1 for beacon ignition
 uniform vec2 uRes;
 uniform float uWarm;        // grade warmth (dusk boost)
 uniform float uFilter;      // photo filter: 0 natural 1 amber 2 nocturne 3 bleach 4 ember
+uniform float uPalette;     // 0 smooth 1 dusk 2 ember 3 mono
+
+float bayer4(vec2 p){
+  int x = int(mod(floor(p.x), 4.0));
+  int y = int(mod(floor(p.y), 4.0));
+  float m[16] = float[16](
+    0.0,  8.0,  2.0, 10.0,
+    12.0, 4.0, 14.0,  6.0,
+    3.0, 11.0,  1.0,  9.0,
+    15.0, 7.0, 13.0,  5.0
+  );
+  return m[x + y * 4] / 16.0;
+}
+
+vec3 quantize(vec3 c, float dither){
+  if (uPalette < 0.5) return c;
+  float d = (bayer4(gl_FragCoord.xy) - 0.5) * dither;
+  if (uPalette > 2.5) {
+    /* one-bit: ink on bone, pure ordered dithering */
+    float l = dot(c, vec3(0.299, 0.587, 0.114)) + d * 5.0;
+    return l > 0.5 ? vec3(0.94, 0.90, 0.79) : vec3(0.05, 0.05, 0.09);
+  }
+  if (uPalette > 1.5) {
+    vec3 P[16] = vec3[16](
+      vec3(0.07, 0.04, 0.05), vec3(0.16, 0.06, 0.08), vec3(0.28, 0.10, 0.10), vec3(0.42, 0.14, 0.11),
+      vec3(0.57, 0.21, 0.12), vec3(0.73, 0.30, 0.14), vec3(0.87, 0.43, 0.17), vec3(0.96, 0.58, 0.21),
+      vec3(1.00, 0.73, 0.31), vec3(1.00, 0.87, 0.50), vec3(1.00, 0.95, 0.78), vec3(1.00, 0.99, 0.95),
+      vec3(0.72, 0.55, 0.38), vec3(0.50, 0.37, 0.28), vec3(0.30, 0.23, 0.19), vec3(0.14, 0.12, 0.14)
+    );
+    vec3 best = P[0]; float bd = 1e9;
+    for (int i = 0; i < 16; i++) {
+      vec3 df = (c + d - P[i]) * vec3(0.85, 1.15, 0.8);
+      float dd = dot(df, df);
+      if (dd < bd) { bd = dd; best = P[i]; }
+    }
+    return best;
+  }
+  /* DUSK: sampled from the game's own twilight art */
+  vec3 P[28] = vec3[28](
+    vec3(0.03, 0.03, 0.06), vec3(0.06, 0.07, 0.13), vec3(0.10, 0.14, 0.24), vec3(0.17, 0.22, 0.32),
+    vec3(0.28, 0.33, 0.44), vec3(0.42, 0.44, 0.54), vec3(0.55, 0.52, 0.62), vec3(0.68, 0.62, 0.72),
+    vec3(0.80, 0.72, 0.72), vec3(0.90, 0.84, 0.74), vec3(0.98, 0.96, 0.90),
+    vec3(0.35, 0.18, 0.22), vec3(0.50, 0.25, 0.26), vec3(0.66, 0.34, 0.24), vec3(0.82, 0.46, 0.24),
+    vec3(0.93, 0.60, 0.28), vec3(0.99, 0.76, 0.38), vec3(1.00, 0.88, 0.55),
+    vec3(0.42, 0.33, 0.30), vec3(0.58, 0.42, 0.32), vec3(0.74, 0.55, 0.38), vec3(0.88, 0.70, 0.48),
+    vec3(0.28, 0.38, 0.24), vec3(0.40, 0.66, 0.56), vec3(0.20, 0.48, 0.50), vec3(0.10, 0.28, 0.35),
+    vec3(0.30, 0.16, 0.30), vec3(0.45, 0.28, 0.48)
+  );
+  vec3 best = P[0]; float bd = 1e9;
+  for (int i = 0; i < 28; i++) {
+    vec3 df = (c + d - P[i]) * vec3(0.85, 1.15, 0.8);
+    float dd = dot(df, df);
+    if (dd < bd) { bd = dd; best = P[i]; }
+  }
+  return best;
+}
 
 vec3 aces(vec3 x){
   const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
@@ -399,15 +455,14 @@ void main(){
 
   c = aces(c * 0.80);
 
-  /* vignette */
+  /* vignette (kept soft; the palette pass happens last) */
   float vig = 1.0 - uVignette * smoothstep(0.45, 1.45, length(fromC) * 1.7);
   c *= vig;
 
-  /* grain */
-  float g = fract(sin(dot(gl_FragCoord.xy + uTime * 61.7, vec2(12.9898, 78.233))) * 43758.5453);
-  c += (g - 0.5) * uGrain;
-
   c = mix(c, vec3(1.0), uFlash);
+
+  /* the whole frame snaps to a tiny hand-picked palette with ordered dither */
+  c = quantize(c, uPalette > 2.5 ? 0.03 : 0.028);
 
   fragColor = vec4(c, 1.0);
 }`;
@@ -445,6 +500,9 @@ export class Renderer {
     this.bloomLevels = 4;
     this.frames = 0;
     this.fpsEMA = 60;
+    this.capPixels = 480;       // longest side of the internal art buffer
+    this.palette = 1;           // 0 smooth, 1 dusk, 2 ember, 3 mono
+    this.pixelScale = 1;        // integer upscale actually used
   }
 
   ensureTargets(w, h) {
@@ -484,12 +542,19 @@ export class Renderer {
     const env = game.env;
     const cam = game.camera;
 
-    /* sizing */
-    const dpr = Math.min(window.devicePixelRatio || 1, 2) * this.quality;
-    const w = Math.max(2, Math.round(game.width * dpr));
-    const h = Math.max(2, Math.round(game.height * dpr));
+    /* sizing: render into a tiny art buffer and integer-upscale it.
+       The canvas CSS size becomes an exact multiple of the buffer so every
+       art pixel is a crisp square block. */
+    const cap = Math.max(160, Math.round(this.capPixels * (0.55 + 0.45 * this.quality)));
+    const scale = Math.max(1, Math.ceil(Math.max(game.width, game.height) / cap));
+    const w = Math.max(2, Math.round(game.width / scale));
+    const h = Math.max(2, Math.round(game.height / scale));
+    this.pixelScale = scale;
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w; this.canvas.height = h;
+      const cw = w * scale, ch = h * scale;
+      this.canvas.style.width = cw + 'px';
+      this.canvas.style.height = ch + 'px';
     }
     this.ensureTargets(w, h);
 
@@ -732,16 +797,17 @@ void main(){
       bind('uBloom2', this.bloomRTs[2].a.tex, 3);
       bind('uBloom3', this.bloomRTs[3].a.tex, 4);
       bind('uRays', this.rts.ray.tex, 5);
-      gl.uniform1f(this.cu.uBloomStrength, 0.42);
-      gl.uniform1f(this.cu.uRayStrength, 0.30);
-      gl.uniform1f(this.cu.uVignette, 0.42);
-      gl.uniform1f(this.cu.uGrain, 0.028);
+      gl.uniform1f(this.cu.uBloomStrength, 0.40);
+      gl.uniform1f(this.cu.uRayStrength, 0.26);
+      gl.uniform1f(this.cu.uVignette, 0.38);
+      gl.uniform1f(this.cu.uGrain, 0.0);
       gl.uniform1f(this.cu.uTime, env.time);
-      gl.uniform1f(this.cu.uAberration, 0.0035);
+      gl.uniform1f(this.cu.uAberration, 0.0);
       gl.uniform1f(this.cu.uFlash, game.flash);
       gl.uniform2f(this.cu.uRes, w, h);
       gl.uniform1f(this.cu.uWarm, 0.35 + 0.65 * env.dusk);
       gl.uniform1f(this.cu.uFilter, game.photoFilter || 0);
+      gl.uniform1f(this.cu.uPalette, this.palette);
     });
   }
 

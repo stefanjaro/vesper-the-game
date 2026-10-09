@@ -72,15 +72,17 @@ vec3 planetBody(vec3 ray, float tSurf){
   vec3 n = normalize(pos - PLANET_DIR);
   float lat = dot(n, PLANET_AXIS);
   float bandN = fbm(vec2(lat * 14.0, uTime * 0.004) + 31.7);
-  float bands = 0.5 + 0.5 * sin(lat * 26.0 + bandN * 5.0);
-  vec3 surf = mix(vec3(0.84, 0.78, 0.66), vec3(0.58, 0.70, 0.68), bands);
-  surf = mix(surf, vec3(0.40, 0.50, 0.57), smoothstep(0.55, 1.0, abs(lat)) * 0.5);
+  /* discrete painted bands survive the palette step */
+  float bands = floor((0.5 + 0.5 * sin(lat * 22.0 + bandN * 5.0)) * 4.0) / 4.0;
+  vec3 surf = mix(vec3(0.94, 0.87, 0.72), vec3(0.40, 0.55, 0.56), bands);
+  vec3 surf2 = mix(vec3(0.62, 0.66, 0.60), vec3(0.26, 0.36, 0.48), bands);
+  surf = mix(surf, surf2, smoothstep(0.45, 0.95, abs(lat)));
   float nl = clamp(dot(n, uSunDir), 0.0, 1.0);
   float nightSide = smoothstep(0.0, -0.25, dot(n, uSunDir));
-  vec3 lit = surf * (nl * 1.15 + 0.028) * mix(1.0, 0.42, uNight * 0.55);
-  lit *= 1.0 - nightSide * 0.80;
-  float term = smoothstep(-0.10, 0.12, nl);
-  return mix(lit * 0.16, lit, term);
+  vec3 lit = surf * (nl * 1.2 + 0.03) * mix(1.0, 0.45, uNight * 0.55);
+  lit *= 1.0 - nightSide * 0.82;
+  float term = smoothstep(-0.04, 0.05, nl);   // crisp terminator
+  return mix(lit * 0.14, lit, term);
 }
 
 vec3 ringColour(vec3 ray, float tRing, float R, out float alpha){
@@ -97,10 +99,10 @@ vec3 ringColour(vec3 ray, float tRing, float R, out float alpha){
   vec3 rel = normalize(h - PLANET_DIR);
   float behind = smoothstep(0.05, 0.45, dot(rel, -uSunDir));
   float lit = mix(1.0, 0.22, behind * 0.9);
-  vec3 ringCol = mix(vec3(0.74, 0.71, 0.60), vec3(0.52, 0.58, 0.62), bandPattern) * lit;
-  ringCol *= mix(1.0, 0.45, uNight * 0.65);
+  vec3 ringCol = mix(vec3(0.82, 0.78, 0.65), vec3(0.56, 0.63, 0.68), bandPattern) * lit;
+  ringCol *= mix(1.0, 0.52, uNight * 0.65);
   alpha = gaps;
-  return ringCol * 1.12;
+  return ringCol * 1.35;
 }
 
 vec3 planetSystem(vec3 ray, out float coverage){
@@ -200,7 +202,7 @@ vec3 aurora(vec3 ray){
       float g = clamp((p.y - 600.0) / 1300.0, 0.0, 1.0);
       vec3 a = mix(vec3(0.05, 0.55, 0.35), vec3(0.25, 0.20, 0.65), g);
       a = mix(a, vec3(0.75, 0.25, 0.45), pow(sheet, 3.0) * 0.35);
-      col += a * d * 0.0016 * dt;
+      col += a * d * 0.0011 * dt;
     }
     t += dt;
   }
