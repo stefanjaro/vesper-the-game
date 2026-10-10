@@ -66,23 +66,61 @@ float fbm(vec2 p){
 const vec3 PLANET_DIR = normalize(vec3(-0.52, 0.40, -0.62));
 const float PLANET_R = 0.30;          // angular radius on the unit dome
 const vec3 PLANET_AXIS = normalize(vec3(0.36, 0.80, 0.48));
+const vec3 PLANET_ATMO = vec3(0.42, 0.60, 0.95);
 
 vec3 planetBody(vec3 ray, float tSurf){
   vec3 pos = ray * tSurf;
   vec3 n = normalize(pos - PLANET_DIR);
   float lat = dot(n, PLANET_AXIS);
+  /* rotation: longitude drifts, so the bands and storms wheel slowly */
+  vec3 e1 = normalize(cross(PLANET_AXIS, vec3(0.0, 1.0, 0.0)));
+  vec3 e2 = cross(PLANET_AXIS, e1);
+  float lon = atan(dot(n, e2), dot(n, e1)) + uTime * 0.012;
   float bandN = fbm(vec2(lat * 14.0, uTime * 0.004) + 31.7);
-  float bands = 0.5 + 0.5 * sin(lat * 24.0 + bandN * 5.0);
+  float bands = 0.5 + 0.5 * sin(lat * 24.0 + bandN * 5.0 + lon * 0.55);
   bands = bands * bands * (3.0 - 2.0 * bands);      // rich banded cloudscape
   vec3 surf = mix(vec3(0.93, 0.86, 0.70), vec3(0.42, 0.56, 0.58), bands);
   vec3 surf2 = mix(vec3(0.66, 0.68, 0.62), vec3(0.24, 0.34, 0.50), bands);
   surf = mix(surf, surf2, smoothstep(0.45, 0.95, abs(lat)));
+
+  /* two great storms wheeling with the bands */
+  for (int si = 0; si < 2; si++){
+    float slat = si == 0 ? 0.34 : -0.52;
+    float slon = si == 0 ? 1.1 : 3.9;
+    float dlat = lat - slat;
+    float dlon = mod(lon - slon - uTime * 0.02 + 3.14159, 6.28318) - 3.14159;
+    float dd = sqrt(dlat * dlat * 5.0 + dlon * dlon * 0.55);
+    float storm = exp(-dd * dd * 26.0);
+    float eye = exp(-pow((dd - 0.17) * 15.0, 2.0));
+    surf = mix(surf, si == 0 ? vec3(0.88, 0.77, 0.62) : vec3(0.70, 0.52, 0.44),
+               storm * (1.0 - eye * 0.85) * 0.65);
+  }
+
   float nl = clamp(dot(n, uSunDir), 0.0, 1.0);
   float nightSide = smoothstep(0.0, -0.25, dot(n, uSunDir));
   vec3 lit = surf * (nl * 1.25 + 0.03) * mix(1.0, 0.40, uNight * 0.55);
   lit *= 1.0 - nightSide * 0.85;
+  /* atmosphere: the limb catches the sun and glows blue */
+  float mu = clamp(dot(n, -ray), 0.0, 1.0);
+  float atmo = pow(1.0 - mu, 3.5);
+  lit += PLANET_ATMO * atmo * (0.12 + 0.95 * nl) * 0.75;
   float term = smoothstep(-0.06, 0.07, nl);
   return mix(lit * 0.12, lit, term);
+}
+
+/* small moons drifting in the giant's rings */
+vec3 moonBody(vec3 ray, vec3 mdir, float r, vec3 rock){
+  float c = dot(ray, mdir);
+  if (c <= 0.0) return vec3(0.0);
+  float ang = acos(clamp(c, -1.0, 1.0));
+  float mask = smoothstep(r, r * 0.86, ang);
+  if (mask <= 0.0) return vec3(0.0);
+  vec3 p = ray * (1.0 / max(c, 1e-4));
+  vec3 n = normalize(p - mdir);
+  float nl = clamp(dot(n, uSunDir), 0.0, 1.0);
+  float term = smoothstep(-0.1, 0.14, dot(n, uSunDir));
+  vec3 lit = rock * (nl * 0.95 + 0.015) * mix(1.0, 0.40, uNight * 0.6);
+  return mix(lit * 0.1, lit, term) * mask;
 }
 
 vec3 ringColour(vec3 ray, float tRing, float R, out float alpha){
@@ -131,6 +169,8 @@ vec3 planetSystem(vec3 ray, out float coverage){
 }
 
 /* ── stars ────────────────────────────────────────────────────────────────── */
+const vec3 GAL_AXIS = normalize(vec3(0.30, 0.58, -0.76));
+
 vec3 stars(vec3 ray){
   vec3 col = vec3(0.0);
   if (uStarAlpha <= 0.001) return col;
@@ -142,17 +182,21 @@ vec3 stars(vec3 ray){
   float h = hash21(cell);
   vec2 starPos = vec2(hash21(cell + 7.1), hash21(cell + 3.7));
   float dist = length(f - starPos);
+  /* the milky way: a tilted band of denser stars and soft glow */
+  float gal = exp(-pow(dot(d, GAL_AXIS) * 3.2, 2.0));
   float bright = smoothstep(0.08, 0.0, dist);
-  bright *= pow(h, 5.0) * 4.2;
+  bright *= pow(h, mix(5.0, 2.7, gal)) * 4.2;
   /* twinkle */
   bright *= 0.7 + 0.3 * sin(uTime * (2.0 + h * 5.0) + h * 40.0);
   /* only above horizon-ish, denser near zenith */
   float horizonFade = smoothstep(-0.06, 0.15, d.y);
-  /* a faint milky band */
-  float band = fbm(uv * 2.0 + 3.0) * 0.5;
   vec3 tint = mix(vec3(0.75, 0.82, 1.0), vec3(1.0, 0.85, 0.7), hash21(cell + 11.0));
   col += tint * bright * horizonFade * uStarAlpha;
-  col += vec3(0.5, 0.6, 0.8) * band * 0.012 * horizonFade * uStarAlpha;
+  /* dust lanes split the band */
+  float dust = fbm(uv * 3.1 + 17.0);
+  float lane = smoothstep(0.42, 0.58, dust);
+  vec3 galCol = mix(vec3(0.30, 0.33, 0.50), vec3(0.62, 0.66, 0.86), lane);
+  col += galCol * gal * (0.05 + 0.075 * dust) * horizonFade * uStarAlpha;
   return col;
 }
 
@@ -265,8 +309,15 @@ void main(){
   vec3 planet = planetSystem(ray, planetCov);
   float haze = 1.0 - exp(-max(ray.y, 0.0) * 2.2);   // planets fade into horizon haze
   planet *= haze * uPlanetGlow;
-  col += stars(ray) * haze * (1.0 - planetCov);
+  /* two moons wheeling in the ring plane */
+  vec3 m1 = normalize(vec3(0.58, 0.43, -0.30));
+  vec3 m2 = normalize(vec3(-0.76, 0.24, 0.33));
+  vec3 moons = moonBody(ray, m1, 0.034, vec3(0.72, 0.66, 0.58))
+             + moonBody(ray, m2, 0.021, vec3(0.60, 0.58, 0.60));
+  float moonCov = clamp(max(moons.r, max(moons.g, moons.b)) * 1.6, 0.0, 1.0);
+  col += stars(ray) * haze * (1.0 - planetCov) * (1.0 - moonCov * 0.9);
   col += planet;
+  col += moons * haze * uPlanetGlow;
 
   /* a soft luminous halo: the giant glows through the haze */
   float pAng = acos(clamp(dot(ray, PLANET_DIR), -1.0, 1.0));

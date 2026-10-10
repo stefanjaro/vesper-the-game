@@ -65,7 +65,7 @@ export function computeEnv(dayT, time, sunBoost = 1, weather = null) {
   const t = i0 === i1 ? 0 : clamp01((A.e - e) / (A.e - B.e));
 
     const env = {
-      time, dayT: phi, sunDir, lightDir,
+      time, dayT: phi, sunDir, lightDir, planetDir,
       gliderPos: null,          // filled by the renderer frame hook
       sunVisibility: 1,
     sunColor: lerpArr(A.sun, B.sun, t).map(x => x * sunBoost),
@@ -146,6 +146,10 @@ uniform vec3 uGroundAmbient;
 uniform sampler2D uDepthPack;
 uniform vec2 uWind;
 uniform float uStorm;
+uniform vec4 uLightPos[8];
+uniform vec3 uLightCol[8];
+uniform vec3 uPlanetDir;
+uniform vec3 uSunDir;
 
 uint uhash(uvec2 q){
   uint h = q.x * 374761393u + q.y * 668265263u;
@@ -243,8 +247,26 @@ void main(){
   float thick = max(terrainDist - waterDist, 0.0);
   vec3 body = deep * (1.0 - exp(-thick * 0.26));
 
+  /* the ringed giant lives in the lake at night */
+  float planetAmt = pow(clamp(dot(refl, uPlanetDir), 0.0, 1.0), 14.0);
+  reflCol += vec3(0.50, 0.58, 0.85) * planetAmt * 0.40 * (0.25 + 0.75 * uNight);
+
   vec3 col = mix(body, reflCol, fres);
   col += uSunColor * spec * (1.0 - uNight * 0.75);
+
+  /* sparkle where the low sun catches the ripples */
+  float sparkle = vnoise(p.xz * 3.7 + floor(uTime * 2.0) * 0.19);
+  sparkle = smoothstep(0.82, 0.99, sparkle);
+  col += uSunColor * pow(ndh, 400.0) * sparkle * 2.2 * (1.0 - uNight) * detail;
+
+  /* glow pools from shards, crystals, beacons and the manta */
+  vec3 lsum = vec3(0.0);
+  for (int i = 0; i < 8; i++){
+    vec3 dl = p - uLightPos[i].xyz;
+    float att = clamp(1.0 - sqrt(dot(dl, dl)) / max(uLightPos[i].w, 1e-3), 0.0, 1.0);
+    lsum += uLightCol[i] * att * att;
+  }
+  col += lsum * (0.40 - 0.28 * fres);
 
   /* broken shoreline foam, gone by ~1.5 m depth, faded with distance */
   float shore = smoothstep(1.6, 0.0, thick);
@@ -259,7 +281,9 @@ void main(){
   alpha = clamp(alpha, 0.0, 1.0) * (1.0 - smoothstep(0.985, 1.0, fres));
 
   float fog = 1.0 - exp(-waterDist * uFogDensity);
-  col = mix(col, uFogColor, fog);
+  float sunAmt = pow(clamp(dot(-ray, uSunDir), 0.0, 1.0), 5.0);
+  vec3 fcol = uFogColor + uSunTint * sunAmt * 0.45 * (1.0 - uNight * 0.55);
+  col = mix(col, fcol, fog);
 
   float occl = smoothstep(-1.4, 1.8, terrainDist - waterDist);
   alpha *= occl;
@@ -330,6 +354,44 @@ void main(){
   fragColor = vec4(acc, 1.0);
 }`;
 
+const FXAA_FS = /* glsl */`#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 fragColor;
+uniform sampler2D uTex;
+uniform vec2 uRes;      // texel size
+void main(){
+  vec2 texel = uRes;
+  vec3 rgbNW = texture(uTex, vUv + vec2(-1.0, -1.0) * texel).rgb;
+  vec3 rgbNE = texture(uTex, vUv + vec2( 1.0, -1.0) * texel).rgb;
+  vec3 rgbSW = texture(uTex, vUv + vec2(-1.0,  1.0) * texel).rgb;
+  vec3 rgbSE = texture(uTex, vUv + vec2( 1.0,  1.0) * texel).rgb;
+  vec3 rgbM  = texture(uTex, vUv).rgb;
+  vec3 luma = vec3(0.299, 0.587, 0.114);
+  float lumaNW = dot(rgbNW, luma);
+  float lumaNE = dot(rgbNE, luma);
+  float lumaSW = dot(rgbSW, luma);
+  float lumaSE = dot(rgbSE, luma);
+  float lumaM  = dot(rgbM, luma);
+  float lumaMin = min(lumaM, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));
+  float lumaMax = max(lumaM, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));
+  vec2 dir;
+  dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
+  dir.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));
+  float dirReduce = max((lumaNW + lumaNE + lumaSW + lumaSE) * 0.03125, 1.0 / 128.0);
+  float rcpDirMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + dirReduce);
+  dir = clamp(dir * rcpDirMin, vec2(-8.0), vec2(8.0)) * texel;
+  vec3 rgbA = 0.5 * (
+    texture(uTex, vUv + dir * (1.0 / 3.0 - 0.5)).rgb +
+    texture(uTex, vUv + dir * (2.0 / 3.0 - 0.5)).rgb);
+  vec3 rgbB = rgbA * 0.5 + 0.25 * (
+    texture(uTex, vUv + dir * -0.5).rgb +
+    texture(uTex, vUv + dir * 0.5).rgb);
+  float lumaB = dot(rgbB, luma);
+  if (lumaB < lumaMin || lumaB > lumaMax) fragColor = vec4(rgbA, 1.0);
+  else fragColor = vec4(rgbB, 1.0);
+}`;
+
 const COMPOSITE_FS = /* glsl */`#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -352,6 +414,8 @@ uniform float uWarm;        // grade warmth (dusk boost)
 uniform float uNight;       // 0 day .. 1 night (softens the grade so night keeps detail)
 uniform float uFilter;      // photo filter: 0 natural 1 amber 2 nocturne 3 bleach 4 ember
 uniform float uPalette;     // 0 smooth 1 dusk 2 ember 3 mono
+uniform vec2 uSunUv;        // sun position in screen uv
+uniform float uFlare;       // lens flare strength
 
 float bayer4(vec2 p){
   int x = int(mod(floor(p.x), 4.0));
@@ -465,6 +529,26 @@ void main(){
   c = clamp(c + k * c * (1.0 - c) * (c - pivot), 0.0, 1.0);
   c = mix(c, c * vec3(1.07, 0.99, 0.92), uWarm * 0.55);
 
+  /* ── lens flare: a warm sun, a horizontal streak, a string of ghosts ── */
+  if (uFlare > 0.002) {
+    float toSunX = exp(-abs(vUv.x - uSunUv.x) * 2.2);
+    float streak = exp(-abs(vUv.y - uSunUv.y) * 110.0);
+    c += vec3(0.60, 0.44, 0.26) * streak * toSunX * 0.22 * uFlare;
+    float sunGlow = exp(-dot(vUv - uSunUv, vUv - uSunUv) * 90.0);
+    c += vec3(0.75, 0.58, 0.34) * sunGlow * 0.34 * uFlare;
+    for (int i = 0; i < 4; i++) {
+      float t = 1.25 + float(i) * 0.5;
+      vec2 gp = mix(uSunUv, vec2(0.5), t);
+      vec2 gd = (vUv - gp) * vec2(1.0, 1.6);
+      float g = exp(-dot(gd, gd) * (3200.0 - float(i) * 500.0));
+      vec3 gc = i == 0 ? vec3(0.60, 0.70, 0.45)
+              : i == 1 ? vec3(0.75, 0.45, 0.55)
+              : i == 2 ? vec3(0.35, 0.60, 0.65)
+              : vec3(0.55, 0.40, 0.70);
+      c += gc * g * (0.16 - float(i) * 0.02) * uFlare;
+    }
+  }
+
   /* vignette */
   float vig = 1.0 - uVignette * smoothstep(0.42, 1.42, length(fromC) * 1.7);
   c *= vig;
@@ -499,6 +583,8 @@ export class Renderer {
     this.ru = uniforms(gl, this.rayProg);
     this.compProg = createProgram(gl, QUAD_VS, COMPOSITE_FS);
     this.cu = uniforms(gl, this.compProg);
+    this.fxaaProg = createProgram(gl, QUAD_VS, FXAA_FS);
+    this.fxau = uniforms(gl, this.fxaaProg);
 
     this.hdr = gl.getExtension('EXT_color_buffer_float');
     const sceneFormat = this.hdr ? gl.RGBA16F : gl.RGBA8;
@@ -515,6 +601,54 @@ export class Renderer {
     this.pixelScale = 1;        // integer upscale actually used
     this.renderStyle = 'painted'; // 'painted' (native, painterly) | 'pixel'
     this._styledPixel = null;
+    /* dynamic light pools from glowing entities (xyz + radius, rgb) */
+    this._lightPos = new Float32Array(32);
+    this._lightCol = new Float32Array(24);
+    this._lightCands = [];
+  }
+
+  /* gather the nearest glowing things and hand them to the lit shaders */
+  collectLights(game) {
+    const cam = game.camera.pos;
+    const ents = game.entities;
+    const cands = this._lightCands;
+    cands.length = 0;
+    const CULL = 640 * 640;
+    const push = (pos, r, g, b, i, radius) => {
+      const dx = pos[0] - cam[0], dy = pos[1] - cam[1], dz = pos[2] - cam[2];
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 > CULL || i <= 0.002) return;
+      cands.push({ p: pos, r: r * i, g: g * i, b: b * i, radius, d2 });
+    };
+    const t = game.time;
+    for (const s of ents.shardDraw) {
+      const pulse = 0.90 + 0.25 * Math.sin(t * 3.1 + s.ph * 6.28);
+      push(s.pos, 1.85, 1.30, 0.58, pulse, 58);
+    }
+    for (const c of ents.crystals) {
+      push(c.pos, 0.50, 0.85, 1.00, 0.28 + 0.06 * c.s, 46);
+    }
+    for (const b of ents.beacons) {
+      push(b.pos, 2.0, 1.35, 0.55, 0.40 + b.lit * 2.6, 150);
+    }
+    if (game.ship) {
+      const ship = game.ship;
+      push([ship.pos[0], ship.pos[1] - 1.5, ship.pos[2]], 1.5, 1.02, 0.45,
+        0.55 + (game.glowPulse || 0) * 0.9, 90);
+    }
+    cands.sort((a, b) => a.d2 - b.d2);
+    const n = Math.min(8, cands.length);
+    for (let i = 0; i < n; i++) {
+      const c = cands[i];
+      this._lightPos[i * 4] = c.p[0];
+      this._lightPos[i * 4 + 1] = c.p[1];
+      this._lightPos[i * 4 + 2] = c.p[2];
+      this._lightPos[i * 4 + 3] = c.radius;
+      this._lightCol[i * 3] = c.r;
+      this._lightCol[i * 3 + 1] = c.g;
+      this._lightCol[i * 3 + 2] = c.b;
+    }
+    for (let i = n; i < 8; i++) this._lightPos[i * 4 + 3] = 0;
   }
 
   ensureTargets(w, h) {
@@ -523,6 +657,7 @@ export class Renderer {
     const hw = Math.max(2, w >> 1), hh = Math.max(2, h >> 1);
     this.rts.scene = resizeRenderTarget(gl, this.rts.scene, w, h, fmt);
     this.rts.depthPack = resizeRenderTarget(gl, this.rts.depthPack, w, h, { internalFormat: gl.RGBA8 });
+    this.rts.post = resizeRenderTarget(gl, this.rts.post, w, h, { internalFormat: gl.RGBA8 });
     this.rts.ray = resizeRenderTarget(gl, this.rts.ray, hw, hh, { internalFormat: this.sceneFormat });
     this.rts.rayB = resizeRenderTarget(gl, this.rts.rayB, hw, hh, { internalFormat: this.sceneFormat });
     while (this.bloomRTs.length < this.bloomLevels) {
@@ -597,6 +732,9 @@ export class Renderer {
     env.sunVisibility = clamp01(env.lightDir[1] * 7.0) * (1 - (game.eclipseDark || 0) * 0.9);
     env.shadowExtent = game.shadowExtent;
     env.storm = game.weather ? game.weather.storm : 0;
+    this.collectLights(game);
+    env.lightPos = this._lightPos;
+    env.lightCol = this._lightCol;
 
     /* ── shadow pass ── */
     this.terrain.computeLightMatrix(env.lightDir, cam.pos, game.shadowExtent);
@@ -680,6 +818,10 @@ export class Renderer {
     gl.uniformMatrix4fv(this.wu.uViewProj, false, viewProj);
     gl.uniform2f(this.wu.uWind, env.windDir[0], env.windDir[2]);
     gl.uniform1f(this.wu.uStorm, env.storm || 0);
+    gl.uniform3fv(this.wu.uPlanetDir, env.planetDir || [0, 0.4, 0]);
+    gl.uniform3fv(this.wu.uSunDir, env.sunDir);
+    if (env.lightPos) gl.uniform4fv(this.wu.uLightPos, env.lightPos);
+    if (env.lightCol) gl.uniform3fv(this.wu.uLightCol, env.lightCol);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.rts.depthPack.tex);
     gl.uniform1i(this.wu.uDepthPack, 0);
@@ -809,8 +951,9 @@ void main(){
     /* soften god rays */
     this.blurPair(this.rts.ray, this.rts.rayB);
 
-    /* composite to screen */
-    this.blit(this.compProg, this.cu, null, () => {
+    /* composite — through a post target in painted mode so FXAA can clean it */
+    const useFxaa = this.renderStyle !== 'pixel';
+    this.blit(this.compProg, this.cu, useFxaa ? this.rts.post : null, () => {
       const bind = (name, tex, unit) => {
         gl.uniform1i(this.cu[name], unit);
         gl.activeTexture(gl.TEXTURE0 + unit);
@@ -834,7 +977,18 @@ void main(){
       gl.uniform1f(this.cu.uNight, env.night);
       gl.uniform1f(this.cu.uFilter, game.photoFilter || 0);
       gl.uniform1f(this.cu.uPalette, this.palette);
+      gl.uniform2f(this.cu.uSunUv, sunUv[0], sunUv[1]);
+      gl.uniform1f(this.cu.uFlare, raysIntensity * (1 - (env.cloudCover || 0) * 0.45) * 0.9);
     });
+
+    if (useFxaa) {
+      this.blit(this.fxaaProg, this.fxau, null, () => {
+        gl.uniform1i(this.fxau.uTex, 0);
+        gl.uniform2f(this.fxau.uRes, 1 / w, 1 / h);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.rts.post.tex);
+      });
+    }
   }
 
   blurPair(a, b) {

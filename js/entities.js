@@ -15,19 +15,34 @@ import { terrainHeight, WORLD } from './world.js';
 
 const LIGHT_CHUNK = /* glsl */`
 uniform vec3 uLightDir;
+uniform vec3 uSunDir;
 uniform vec3 uSunColor;
+uniform vec3 uSunTint;
 uniform vec3 uSkyAmbient;
 uniform vec3 uGroundAmbient;
 uniform vec3 uFogColor;
 uniform float uFogDensity;
 uniform vec3 uCamPos;
 uniform float uNight;
+uniform vec4 uLightPos[8];
+uniform vec3 uLightCol[8];
 vec3 applyLight(vec3 albedo, vec3 n, vec3 p){
   float ndl = clamp(dot(n, uLightDir), 0.0, 1.0);
   vec3 amb = mix(uGroundAmbient, uSkyAmbient, clamp(n.y * 0.5 + 0.5, 0.0, 1.0)) * 1.5;
   vec3 lit = albedo * (uSunColor * ndl + amb);
-  float fog = 1.0 - exp(-length(p - uCamPos) * uFogDensity);
-  return mix(lit, uFogColor, fog);
+  vec3 lsum = vec3(0.0);
+  for (int i = 0; i < 8; i++){
+    vec3 dl = p - uLightPos[i].xyz;
+    float att = clamp(1.0 - sqrt(dot(dl, dl)) / max(uLightPos[i].w, 1e-3), 0.0, 1.0);
+    lsum += uLightCol[i] * att * att;
+  }
+  lit += albedo * lsum;
+  float fdist = length(p - uCamPos);
+  float fog = 1.0 - exp(-fdist * uFogDensity);
+  vec3 vdir = (p - uCamPos) / max(fdist, 1e-3);
+  float sunAmt = pow(clamp(dot(vdir, uSunDir), 0.0, 1.0), 5.0);
+  vec3 fogC = uFogColor + uSunTint * sunAmt * 0.45 * (1.0 - uNight * 0.55);
+  return mix(lit, fogC, fog);
 }`;
 
 /* instancing helper: shares a geometry VAO and adds an instance buffer */
@@ -561,10 +576,15 @@ const PARTICLE_FS = /* glsl */`#version 300 es
 precision highp float;
 in vec4 vData;
 out vec4 fragColor;
+uniform float uNight;
+uniform float uTime;
 void main(){
   vec2 uv = gl_PointCoord * 2.0 - 1.0;
   float r = length(uv);
   float a = exp(-r * r * 3.0) * vData.y;
+  /* fireflies only really glow after dark, with a slow pulse */
+  float fire = vData.w;
+  a *= 0.55 + fire * (0.5 + 0.35 * sin(uTime * 2.6 + vData.z * 9.0) + 1.2 * uNight);
   if (a < 0.004) discard;
   vec3 warm = vec3(1.0, 0.82, 0.55);
   vec3 cool = vec3(0.55, 0.95, 0.85);
@@ -1010,6 +1030,14 @@ export class Entities {
       const p = ps[i];
       p.life -= p.decay * dt;
       if (p.life <= 0) { ps[i] = ps[ps.length - 1]; ps.pop(); continue; }
+      if (p.fire) {
+        /* fireflies hover: no gravity, a lazy wander */
+        p.p[0] += (p.v[0] + Math.sin(this.time * 0.7 + p.p[1] * 0.3)) * dt;
+        p.p[1] += (p.v[1] + Math.sin(this.time * 1.1 + p.p[0] * 0.5) * 0.5) * dt;
+        p.p[2] += (p.v[2] + Math.cos(this.time * 0.9 + p.p[2] * 0.4)) * dt;
+        p.v[0] *= (1 - 0.4 * dt); p.v[1] *= (1 - 0.4 * dt); p.v[2] *= (1 - 0.4 * dt);
+        continue;
+      }
       p.p[0] += p.v[0] * dt; p.p[1] += p.v[1] * dt; p.p[2] += p.v[2] * dt;
       p.v[1] -= 7 * dt;
       p.v[0] *= (1 - 1.4 * dt); p.v[2] *= (1 - 1.4 * dt);
@@ -1038,6 +1066,20 @@ export class Entities {
       const x = ship.pos[0] + Math.cos(a) * r, z = ship.pos[2] + Math.sin(a) * r;
       const gy = Math.max(terrainHeight(x, z), WORLD.WATER_LEVEL);
       ps.push({ p: [x, gy + 2 + Math.random() * 50, z], v: [7, 1, 3], life: 1, decay: 0.07, size: 0.8 + Math.random() * 1.3, hue: 0 });
+    }
+
+    /* fireflies gather over the dunes after dark */
+    if (game.env && game.env.night > 0.35 && Math.random() < 0.45 && ps.length < 3200) {
+      const r = 30 + Math.random() * 130;
+      const a = Math.random() * Math.PI * 2;
+      const x = ship.pos[0] + Math.cos(a) * r, z = ship.pos[2] + Math.sin(a) * r;
+      const gy = Math.max(terrainHeight(x, z), WORLD.WATER_LEVEL);
+      ps.push({
+        p: [x, gy + 1.5 + Math.random() * 18, z],
+        v: [(Math.random() - 0.5) * 1.2, (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 1.2],
+        life: 1, decay: 0.035 + Math.random() * 0.03,
+        size: 0.55 + Math.random() * 0.85, hue: Math.random() * 0.25, fire: true,
+      });
     }
 
     /* weather: sand riding the wind, and rain streaks */
@@ -1130,13 +1172,17 @@ export class Entities {
     const gl = this.gl;
     gl.uniformMatrix4fv(u.uViewProj, false, viewProj);
     gl.uniform3fv(u.uLightDir, env.lightDir);
+    gl.uniform3fv(u.uSunDir, env.sunDir);
     gl.uniform3fv(u.uSunColor, env.sunColor);
+    gl.uniform3fv(u.uSunTint, env.sunTint);
     gl.uniform3fv(u.uSkyAmbient, env.skyAmbient);
     gl.uniform3fv(u.uGroundAmbient, env.groundAmbient);
     gl.uniform3fv(u.uFogColor, env.fogColor);
     gl.uniform1f(u.uFogDensity, env.fogDensity);
     gl.uniform3fv(u.uCamPos, cam.pos);
     gl.uniform1f(u.uNight, env.night);
+    if (env.lightPos) gl.uniform4fv(u.uLightPos, env.lightPos);
+    if (env.lightCol) gl.uniform3fv(u.uLightCol, env.lightCol);
   }
 
   drawOpaque(env, view, proj, viewProj, cam, renderer) {
@@ -1288,10 +1334,12 @@ export class Entities {
       gl.useProgram(this.partProg);
       gl.uniformMatrix4fv(this.pau.uViewProj, false, viewProj);
       gl.uniform3fv(this.pau.uCamPos, cam.pos);
+      gl.uniform1f(this.pau.uNight, env.night);
+      gl.uniform1f(this.pau.uTime, this.time);
       let w = 0;
       for (const p of this.particles) {
         this.partData[w++] = p.p[0]; this.partData[w++] = p.p[1]; this.partData[w++] = p.p[2];
-        this.partData[w++] = p.size; this.partData[w++] = clamp01(p.life) * 0.55; this.partData[w++] = p.hue; this.partData[w++] = 0;
+        this.partData[w++] = p.size; this.partData[w++] = clamp01(p.life) * 0.55; this.partData[w++] = p.hue; this.partData[w++] = p.fire ? 1 : 0;
       }
       gl.bindVertexArray(this.partMesh.vao);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.partMesh.vbo);

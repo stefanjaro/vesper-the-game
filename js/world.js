@@ -133,11 +133,16 @@ in vec3 vWorld;
 in vec3 vNormal;
 in vec4 vShadowPos;
 uniform vec3 uLightDir;
+uniform vec3 uSunDir;
 uniform vec3 uSunColor;
+uniform vec3 uSunTint;
 uniform vec3 uSkyAmbient;
 uniform vec3 uGroundAmbient;
 uniform vec3 uFogColor;
 uniform float uFogDensity;
+uniform vec2 uWind;
+uniform float uCloudCover;
+uniform float uNight;
 uniform vec3 uCamPos;
 uniform float uWaterLevel;
 uniform float uTime;
@@ -147,6 +152,8 @@ uniform float uShadowExtent;
 uniform mat4 uLightViewProjM;
 uniform vec3 uGliderPos;     // manta position, for its soft drop-shadow
 uniform float uSunVisibility;
+uniform vec4 uLightPos[8];   // xyz world, w radius (glowing things)
+uniform vec3 uLightCol[8];
 out vec4 fragColor;uint uhash(uvec2 q){
   uint h = q.x * 374761393u + q.y * 668265263u;
   h = (h ^ (h >> 13u)) * 1274126177u;
@@ -202,6 +209,25 @@ void main(){
   vec3 salt  = vec3(0.74, 0.72, 0.70);
   vec3 oasis = vec3(0.22, 0.36, 0.22);
 
+  /* ── provinces: the desert changes character across the world ── */
+  float pA = vnoise(p.xz * 0.00038 + 31.7);
+  float pB = vnoise(p.xz * 0.00021 + 73.1);
+  float pC = vnoise(p.xz * 0.00055 + 11.9);
+  float canyon = smoothstep(0.58, 0.78, pA) * smoothstep(0.30, 0.50, pB);
+  float basalt = (1.0 - smoothstep(0.30, 0.50, pA)) * (1.0 - smoothstep(0.35, 0.55, pC));
+  float salts  = smoothstep(0.62, 0.80, pC) * (1.0 - smoothstep(0.35, 0.55, pA));
+  float highland = smoothstep(120.0, 260.0, h);
+  sandA = mix(sandA, vec3(0.86, 0.47, 0.30), canyon * 0.55);
+  sandB = mix(sandB, vec3(0.44, 0.16, 0.13), canyon * 0.55);
+  rock  = mix(rock,  vec3(0.38, 0.12, 0.09), canyon * 0.75);
+  sandA = mix(sandA, vec3(0.30, 0.29, 0.34), basalt * 0.75);
+  sandB = mix(sandB, vec3(0.13, 0.13, 0.17), basalt * 0.75);
+  rock  = mix(rock,  vec3(0.20, 0.19, 0.23), basalt * 0.80);
+  salt  = mix(salt,  vec3(0.88, 0.86, 0.82), salts);
+  sandA = mix(sandA, vec3(1.00, 0.80, 0.52), highland * 0.45);
+  sandB = mix(sandB, vec3(0.60, 0.42, 0.30), highland * 0.45);
+  rock  = mix(rock,  vec3(0.34, 0.27, 0.32), highland * 0.40);
+
   float grain = (vnoise(p.xz * 0.9) - 0.5) * (0.20 + 0.25 * detailFade);
   vec3 col = mix(sandB, sandA, 0.5 + grain);
   col = mix(col, col * vec3(1.10, 0.97, 0.85), vnoise(p.xz * 0.011) * 0.85);
@@ -224,19 +250,44 @@ void main(){
   col *= mix(vec3(1.08, 1.00, 0.92), vec3(0.80, 0.88, 1.14), shade * 0.55);
   float sh = mix(1.0, shadowFactor(p, nGeom, ndlGeom), 0.85);
   float sunTerm = clamp(ndlGeom, 0.0, 1.0) * sh;
+  /* drifting cloud shadows dapple the land */
+  vec2 cq = p.xz * 0.00062 + uWind * (uTime * 0.0028);
+  float cd = vnoise(cq) * 0.62 + vnoise(cq * 2.33 + 7.7) * 0.38;
+  float cloud = smoothstep(0.60 - uCloudCover * 0.34, 0.86 - uCloudCover * 0.30, cd);
+  sunTerm *= 1.0 - cloud * 0.52 * clamp(nGeom.y, 0.0, 1.0);
   /* cavity darkening: steep faces sink into the shadow colour */
   float ao = 1.0 - 0.26 * smoothstep(0.22, 0.85, slope);
   vec3 amb = mix(uGroundAmbient, uSkyAmbient, clamp(nGeom.y * 0.5 + 0.5, 0.0, 1.0)) * 1.55;
   vec3 lit = col * (uSunColor * sunTerm + amb * ao);
+
+  /* shimmering grain where the low sun catches the sand */
+  vec3 hv = normalize(uLightDir + normalize(uCamPos - p));
+  float spark = vnoise(p.xz * 2.6 + floor(uTime * 1.7) * 0.13);
+  spark = smoothstep(0.78, 0.99, spark);
+  float glint = pow(clamp(dot(n, hv), 0.0, 1.0), 90.0) * spark;
+  lit += uSunColor * glint * 0.35 * uSunVisibility;
 
   /* the manta's soft drop-shadow on the sand */
   float dGl = distance(p.xz, uGliderPos.xz);
   float glFade = clamp(1.0 - (uGliderPos.y - p.y) / 170.0, 0.0, 1.0);
   lit *= 1.0 - 0.5 * exp(-dGl * dGl * 0.09) * glFade * uSunVisibility;
 
+  /* light pools from shards, crystals, beacons and the manta itself */
+  vec3 lsum = vec3(0.0);
+  for (int i = 0; i < 8; i++){
+    vec3 dl = p - uLightPos[i].xyz;
+    float att = clamp(1.0 - sqrt(dot(dl, dl)) / max(uLightPos[i].w, 1e-3), 0.0, 1.0);
+    lsum += uLightCol[i] * att * att;
+  }
+  lit += col * lsum * 0.85;
+
   float dist = length(p - uCamPos);
   float fog = 1.0 - exp(-dist * uFogDensity);
-  lit = mix(lit, uFogColor, fog);
+  /* haze drinks the sun's colour: the air glows when you face the light */
+  vec3 vdir = (p - uCamPos) / max(dist, 1e-3);
+  float sunAmt = pow(clamp(dot(vdir, uSunDir), 0.0, 1.0), 5.0);
+  vec3 fcol = uFogColor + uSunTint * sunAmt * 0.45 * (1.0 - uNight * 0.55);
+  lit = mix(lit, fcol, fog);
 
   fragColor = vec4(lit, 1.0);
 }`;
@@ -537,7 +588,12 @@ export class Terrain {
     gl.uniformMatrix4fv(this.u.uViewProj, false, env.viewProj);
     gl.uniformMatrix4fv(this.u.uLightViewProj, false, this.lightViewProj);
     gl.uniform3fv(this.u.uLightDir, env.lightDir);
+    gl.uniform3fv(this.u.uSunDir, env.sunDir);
     gl.uniform3fv(this.u.uSunColor, env.sunColor);
+    gl.uniform3fv(this.u.uSunTint, env.sunTint);
+    gl.uniform2f(this.u.uWind, env.windDir ? env.windDir[0] : 1, env.windDir ? env.windDir[2] : 0);
+    gl.uniform1f(this.u.uCloudCover, env.cloudCover || 0.34);
+    gl.uniform1f(this.u.uNight, env.night);
     gl.uniform3fv(this.u.uSkyAmbient, env.skyAmbient);
     gl.uniform3fv(this.u.uGroundAmbient, env.groundAmbient);
     gl.uniform3fv(this.u.uFogColor, env.fogColor);
@@ -550,6 +606,8 @@ export class Terrain {
     gl.uniformMatrix4fv(this.u.uLightViewProjM, false, this.lightViewProj);
     gl.uniform3fv(this.u.uGliderPos, env.gliderPos || [0, 0, 0]);
     gl.uniform1f(this.u.uSunVisibility, env.sunVisibility !== undefined ? env.sunVisibility : 1);
+    gl.uniform4fv(this.u.uLightPos, env.lightPos || new Float32Array(32));
+    gl.uniform3fv(this.u.uLightCol, env.lightCol || new Float32Array(24));
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.shadowTex);
     gl.uniform1i(this.u.uShadowMap, 0);

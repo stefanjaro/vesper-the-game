@@ -14,7 +14,8 @@ just JavaScript, mathematics and one honest WebGL2 context.
 
 The default look is **painted**: native resolution, painterly shading, a
 Hollow-Knight-flavoured grade — deep indigo shadows, warm gold highlights,
-strong bloom and vignette. Flip `O` → **STYLE** to **PIXEL** and the whole
+strong bloom, lens flare and vignette — and everything luminous, from the
+shards you gather to the manta itself, throws real light onto the land. Flip `O` → **STYLE** to **PIXEL** and the whole
 world is drawn at a tiny internal resolution — a few hundred pixels across —
 and integer-upscaled, so every pixel is a crisp block, optionally snapped to
 a **hand-picked 28-colour palette with ordered dithering** (the classic
@@ -66,17 +67,25 @@ also the fuel you burn, so skim the dunes between beacons.
   ridged multifractals) sampled on the CPU, streamed as a quadtree of 3×3
   subdivided chunks with skirts, frustum-culled, with parent-mesh fallback so
   the horizon never opens a hole while streaming. Shaded smoothly with dune
-  ripples that fade with distance, slope-based cavity darkening and rich
-  painted colour fields.
+  ripples that fade with distance, slope-based cavity darkening, sun-catching
+  sand glints, drifting cloud shadows, and four provinces that change the
+  desert's character — gold highlands, crimson canyonlands, dark basalt and
+  pale salt pans.
 - **Shadows** — a 2048² sun-space depth map with 3×3 PCF, refreshed every
   frame: crisp dusk silhouettes with soft edges.
+- **Light** — shards, crystals, lit beacons and the manta itself cast real
+  light pools on the sand and water; the nearest eight travel to the shaders
+  every frame. After dark, fireflies drift over the dunes.
 - **Water** — no mesh at all: each screen pixel raycasts the water plane,
   then hardware depth-testing against the terrain composite for occlusion,
-  with fresnel, depth absorption, shoreline foam and distance-flattened waves.
-- **Sky** — analytic atmosphere with mie glow, hashed starfield, high clouds
-  lit by the sun, aurora curtains, meteors, and an analytic ringed giant with
-  banded cloudscape and shadowed ring plane — and, when the ringed giant
-  crosses the sun, an eclipse with a ring of fire.
+  with fresnel, depth absorption, shoreline foam, sun-sparkle, glow pools
+  from everything luminous, and the ringed giant reflected in the deep.
+- **Sky** — analytic atmosphere with mie glow, a tilted milky-way band of
+  denser stars and dust lanes, high clouds lit by the sun, aurora curtains,
+  meteors, two moons with real phases, and an analytic ringed giant with
+  rotating bands, two great storms, a glowing atmospheric limb and a
+  shadowed ring plane — and, when the giant crosses the sun, an eclipse
+  with a ring of fire.
 - **Weather** — fronts roll through on their own schedule, weighted by the
   land's moisture: dust storms that swallow the horizon, rain, thunder with
   lightning, and gales that shove the manta off its line. Each front changes
@@ -86,10 +95,11 @@ also the fuel you burn, so skim the dunes between beacons.
 - **Lore stones** — weathered monoliths hidden in the world; glide close and
   they whisper. Find them all.
 - **Post** — HDR pipeline (RGBA16F when available), threshold bloom, radial
-  god rays from the scene itself, ACES tonemap, then a high-contrast grade:
-  indigo shadows, saturated mids, warm gold highlights, strong vignette —
-  and, in pixel style, palette quantisation with a 4×4 Bayer dither as the
-  final step. Resolution and shadow extent auto-tune to hold frame rate.
+  god rays from the scene itself, a procedural lens flare, ACES tonemap,
+  then a high-contrast grade: indigo shadows, saturated mids, warm gold
+  highlights, strong vignette, and FXAA to clean the edges — and, in pixel
+  style, palette quantisation with a 4×4 Bayer dither as the final step.
+  Resolution and shadow extent auto-tune to hold frame rate.
 - **Audio** — WebAudio synthesis: filtered-noise wind and rain tied to the
   weather, thunder, a pad that gains a voice with every beacon awakened and
   walks a faster modal progression as the world wakes, FM chimes that answer
